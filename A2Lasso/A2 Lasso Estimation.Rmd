@@ -1,0 +1,322 @@
+---
+title: "Assignment 2 Lasso Estimator"
+Name: Hriscu Lavinia Beatrice; Jimenez Rodriguez Victor, Wallgren Ian, Wanchang Zhang
+output: html_document
+date: "2023-02-28"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Lasso for Boston Housing Data
+##1.1 Exercise glmnet to fit the model using the ridge regression. Compare the 10-fold cross validation results from function cv.glmnet with your own functions
+```{r}
+# For the Boston House-price corrreced dataset using Lasso estimation in glmnet to fit the regression model where the response is MEDV and the explanatory variables are the remaining 14 variables in the previous list
+# Try to provide an inerpretation to the estimated model
+library(Hmisc)
+library(glmnet)
+#select only the variable of interest to the model, in the order desired:
+boston = boston.c[c("CRIM","ZN","INDUS","CHAS","NOX","RM","AGE","DIS","RAD","TAX","PTRATIO","B","LSTAT","MEDV")]
+labs = list(
+  'per capita crime rate by town',
+  'proportion of the residential land zone for lots over 25,000 sq.ft.',
+  'proportion of non-retail business ycres per town',
+  'Charles River dummy variable(=1 if tract bounds river; 0 otherwise)',
+  'Nitric Oxides Concentration(parts per 10 million)',
+  'average number of rooms per dwelling',
+  'proportion of owner-occupied units built prior to 1940',
+  'weighted distances to five Boston employment centres',
+  'index of accessibilitz to radial highways',
+  'full-value property-tax rate per $10,000',
+  'Pupil-teacher ratio by town',
+  '1000(Bk-0.63)^2where Bk is the proportion of blacks by town',
+  '% LOWER STATUS OF THE POPULATION',
+  'Median value of owner-occupied dhomes in $1000´s'
+)
+label(boston,which=NULL) = labs
+names(boston.c) # names of the variables
+describe(boston,1)# name,label,summary statistics
+nobs = dim(boston)[1] # 506 observations
+# Scaled data
+Y = scale(boston$MEDV,center=TRUE,scale=TRUE)
+# since CHAS is a binary variable, we need to use as.vector to transform the numeric to category
+boston$CHAS = as.vector(boston$CHAS)
+X1 = scale(boston[,c(-4,-14)],center=TRUE,scale=TRUE)
+X = cbind(X1,as.numeric(boston$CHAS)-1)
+p = dim(X)[2]
+n = dim(X)[1]
+# Nonscaled data
+Y.noscale = scale(boston$MEDV,center = FALSE,scale=FALSE)
+X1.noscale = scale(boston[,c(-4,-14)],center=FALSE,scale=FALSE)
+X.noscale = cbind(X1.noscale,as.numeric(boston$CHAS)-1)
+#X.noscale = scale(boston[,c(-14)],center=FALSE,scale=FALSE)#as.matrix(boston[,c(-14)])
+
+lasso.1 <- glmnet(X,Y,standandize = FALSE, intercept = FALSE)# Lasso.1 corresponds to the scaled data
+cv.lasso.1 <- cv.glmnet(X,Y,standandize= FALSE, intercept = FALSE) # by default nfolds = 10
+
+lasso.2 <- glmnet(X.noscale,Y.noscale, standardize=TRUE, intercept=TRUE)
+cv.lasso.2 <- cv.glmnet(X.noscale,Y.noscale, standardize=TRUE, intercept=TRUE)
+print(coef(lasso.2,s=cv.lasso.2$lambda.1se))
+mean.Y <- mean(Y.noscale)
+mean.X <- apply(X.noscale,2,mean)
+sd.X <- apply(X.noscale,2,sd)
+# intercept:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[1]
+# b) from the fitted model centering and scaling
+mean.Y - sum((mean.X/sd.X) * coef(lasso.1,s=cv.lasso.2$lambda.1se)[-1])
+
+# coefficients:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[-1]
+# b) from the fitted model centering and scaling
+coef(lasso.1,s=cv.lasso.2$lambda.1se)[-1] / sd.X
+
+
+# label gives which column (variable) corresponds to each line
+
+# Interpretation:
+# The lambda controls the shrinkage content, increases from 0 to +Infty
+# When lambda is almost 0, log(lambda) is -Infty, all coefficients are nonzero.
+# When lambda is lambda.min, where the MSPE is minimized, there are 7 coefficients being nonzero, the 7th one being zero
+# intercept:
+# coefficients:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.min)[-1]# 11 coefficients nonzero
+# b) from the fitted model centering and scaling
+coef(lasso.1,s=cv.lasso.2$lambda.min)[-1] / sd.X
+# When lambda is lambda.1se, where the MSPE is minimized, there are 7 coefficients being nonzero, the 7th one being zero
+# intercept:
+# coefficients:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[-1] # 8 coefficients nonzero
+# b) from the fitted model centering and scaling
+coef(lasso.1,s=cv.lasso.2$lambda.1se)[-1] / sd.X
+```
+##1.2 Exercise glmnet to fit the model using the ridge regression. Compare the 10-fold cross validation results from function cv.glmnet with your own functions
+```{r}
+# Exercise glmnet to fit the model using the ridge regression. Compare the 10-fold cross validation results from function cv.glmnet with your own functions
+ridge.1 <- glmnet(X,Y,alpha = 0,standandize = FALSE, intercept = FALSE)# Lasso.1 corresponds to the scaled data
+cv.ridge.1 <- cv.glmnet(X,Y,alpha = 0,standandize= FALSE, intercept = FALSE) # by default nfolds = 10
+
+ridge.2 <- glmnet(X.noscale,Y.noscale,alpha = 0, standardize=TRUE, intercept=TRUE)
+cv.ridge.2 <- cv.glmnet(X.noscale,Y.noscale,alpha = 0, standardize=TRUE, intercept=TRUE)
+
+# intercept:
+# a) No centering, no scaling
+coef(ridge.2,s=cv.ridge.2$lambda.1se)[1]
+# b) from the fitted model centering and scaling
+mean.Y - sum((mean.X/sd.X) * coef(ridge.1,s=cv.ridge.2$lambda.1se)[-1])
+
+# coefficients:
+# a) No centering, no scaling
+coef(ridge.2,s=cv.ridge.2$lambda.1se)[-1]
+# b) from the fitted model centering and scaling
+coef(ridge.1,s=cv.ridge.2$lambda.1se)[-1] / sd.X
+
+
+# Our own ridge regression function
+pmse_kcv= function(X,Y,lambda.v,K){
+  n.lambdas = length(lambda.v)
+  p = dim(X)[2]
+  # Split the data into k-folds
+  set.seed(123)
+  folds = sample(rep(1:k,length.out = dim(X)[1]))
+  pmse.lambda = matrix(0,nrow=n.lambdas,ncol=1)
+  for (k in 1:K){
+    # Get the training and validation sets for this fold
+    x.train = X[folds != k,]
+    y.train = Y[folds != k]
+    x.val = X[folds == k,]
+    y.val = Y[folds == k]
+    nv = dim(x.val)[1]
+    # now fi the model for each lambda
+    for (l in  1:n.lambdas){
+      beta.lambda = t(solve(t(x.train)%*%x.train + lambda.v[l]*diag(1,p)))%*%t(x.train)%*%y.train
+      # Now we can calculate the pmse for lambda
+      error.lambda = y.val -x.val %*% beta.lambda
+      pmse.lambda[l] = pmse.lambda[l] + t(error.lambda)%*%error.lambda
+    }
+  }
+  # Now we divide by n
+  pmse.cv = pmse.lambda/dim(X)[1]
+  return(pmse.cv)
+}
+k = 10
+lambda.max = 1e5
+n.lambdas = 100
+lambda.v = exp(seq(0,log(lambda.max+1),length=n.lambdas))-1
+pmse.cv = pmse_kcv(X,Y,lambda.v,k)
+posmin = which.min(pmse.cv)
+lambda.cv = lambda.v[posmin]# 5.428
+cv.ridge.1$lambda.1se
+cv.ridge.2$lambda.1se # 4.7815 more close to lambda.cv
+cv.ridge.1$lambda.min
+cv.ridge.2$lambda.min
+```
+
+# 2 A Regression model with $p \geq n$
+
+## 2.1 Use 'glmnet' and 'cv.glmnet' to obtain the Lasso estimation for regression 'log.surv' against 'expr'. How many coefficients different from zero are in the Lasso estimator? Illustrate the result with two graphs
+```{r}
+require(glmnet)
+express <- read.csv("journal.pbio.0020108.sd012.CSV",header=FALSE)
+surv <- read.csv("journal.pbio.0020108.sd013.CSV",header=FALSE)
+death <-(surv[,2]==1)
+log.surv.death <- log(surv[death,1]+.05)
+expr.death <- as.matrix(t(express[,death]))
+
+live <- (surv[,2]==0)
+log.surv.live <- log(surv[live,1]+.05)
+expr.live <- as.matrix(t(express[,live]))
+X.val.noscale <- expr.live
+Y.val.noscale <- log.surv.live
+X.val.scale <- scale(X.val.noscale,center=TRUE,scale=TRUE)
+Y.val.scale <- scale(Y.val.noscale,center=TRUE,scale=TRUE)
+n.val <- dim(X.val.scale)
+# Use glmnet and cv.glmnet to obtain the Lasso estimation for regressing log.surv against expr. How many coefficient different from zero are in the Lasso estimator?
+# Illustrate the result with two graphics
+
+X.noscale = expr.death
+Y.noscale = log.surv.death
+X.scale = scale(X.noscale,center=TRUE,scale=TRUE)
+Y.scale = scale(Y.noscale,center=TRUE,scale=TRUE)
+n <- dim(X.scale)[1]
+p <- dim(X.scale)[2]
+lasso.1 <- glmnet(X.scale,Y.scale,standandize = FALSE, intercept = FALSE)# Lasso.1 corresponds to the scaled data
+cv.lasso.1 <- cv.glmnet(X.scale,Y.scale,standandize= FALSE, intercept = FALSE) # by default nfolds = 10
+print(cv.lasso.1$lambda.min)
+print(cv.lasso.1$lambda.1se)
+
+lasso.2 <- glmnet(X.noscale,Y.noscale, standardize=TRUE, intercept=TRUE)
+cv.lasso.2 <- cv.glmnet(X.noscale,Y.noscale, standardize=TRUE, intercept=TRUE)
+#print(coef(lasso.2,s=cv.lasso.2$lambda.1se))
+print(cv.lasso.2$lambda.min)
+print(cv.lasso.2$lambda.1se)
+mean.Y <- mean(Y.noscale)
+mean.X <- apply(X.noscale,2,mean)
+sd.X <- apply(X.noscale,2,sd)
+
+# intercept:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[1]
+# b) from the fitted model centering and scaling
+mean.Y - sum((mean.X/sd.X) * coef(lasso.1,s=cv.lasso.2$lambda.1se)[-1])
+
+# coefficients:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[-1]
+# b) from the fitted model centering and scaling
+coef(lasso.1,s=cv.lasso.2$lambda.1se)[-1] / sd.X
+
+# cv.glment returns an object 
+# lambda: the values of lambda used in the fits
+# cvm: the mean cross-validated erro- a vector of length(lambda)
+# lambda.min: value of lambda that gives minimum cvm
+# lambda.1se: largest value of lambda such that the error is within 1 standard error of minimum
+op <- par(mfrow=c(2,1))
+plot(cv.lasso.1)
+plot(lasso.1,xvar="lambda")
+abline(v=log(cv.lasso.1$lambda.min),col=2,lty=2) # lambda min = 0.3650
+abline(v=log(cv.lasso.1$lambda.1se),col=2,lty=2) # lambda.1se = 0.6088
+print(coef(lasso.1,s=cv.lasso.1$lambda.min))
+print(coef(lasso.1,s=cv.lasso.1$lambda.1se))
+par(op)
+
+mean.Y <- mean(Y.noscale)
+mean.X <- apply(X.noscale,2,mean)
+sd.X <- apply(X.noscale,2,sd)
+```
+##2.2 Compute the fitted values with the Lasso estimated model(you can use predict). Plot the observed values for the response variable against the Lasso fitted values
+
+```{r}
+
+# intercept:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[1]
+# b) from the fitted model centering and scaling
+mean.Y - sum((mean.X/sd.X) * coef(lasso.1,s=cv.lasso.1$lambda.1se)[-1])
+
+# coefficients:
+# a) No centering, no scaling
+coef(lasso.2,s=cv.lasso.2$lambda.1se)[-1]
+coef(lasso.2,s=cv.lasso.2$lambda.min)[-1]
+# b) from the fitted model centering and scaling
+coef(lasso.1,s=cv.lasso.1$lambda.1se)[-1] / sd.X
+coef(lasso.1,s=cv.lasso.1$lambda.min)[-1] / sd.X
+
+# From the graph, there are 4 coefficient different from 0 when $\log(\lambda) = -1$
+coefficients.1.lambdamin = coef(lasso.1,s=cv.lasso.1$lambda.min)
+coefficients.1.lambda1se = coef(lasso.1,s=cv.lasso.1$lambda.1se)
+coefficients.1.lambdamin[coefficients.1.lambdamin[,1]!=0,]
+numberOfCoefficientsNonzero.1.lambdamin = length(coefficients.1.lambdamin[coefficients.1.lambdamin[,1]!=0,]) # 3
+numberOfCoefficientsNonzero.1.lambda1se = length(coefficients.1.lambdamin[coefficients.1.lambda1se[,1]!=0,]) # 0
+# From the graph, there are 24 coefficient different from 0 when $\log(\lambda) = -1$
+coefficients.2.lambdamin = coef(lasso.2,s=cv.lasso.2$lambda.min)
+coefficients.2.lambda1se = coef(lasso.2,s=cv.lasso.2$lambda.1se)
+coefficients.2.lambdamin[coefficients.2.lambdamin[,1]!=0,]
+numberOfCoefficientsNonzero.2.lambdamin = length(coefficients.2.lambdamin[coefficients.2.lambdamin[,1]!=0,])-1 # 3
+numberOfCoefficientsNonzero.2.lambda1se = length(coefficients.2.lambdamin[coefficients.2.lambda1se[,1]!=0,])-1 # 0
+
+# prediction in the prediction set to predict the survival time of people still alive
+# a) No centering, no scaling
+Y.val.noscale <- log.surv.live
+Y.val.noscale.hat <- predict(lasso.2,newx=X.val.noscale,type = "response",s=cv.lasso.2$lambda.min)
+plot(Y.val.noscale.hat,Y.val.noscale,asp=1)
+abline(a=0,b=1,col=2)
+# b) from the fitted model centering and scaling
+Y.val.hat <- predict(lasso.1,newx=X.val.scale,type = "response",s=cv.lasso.1$lambda.min)
+Y.val.noscale.hat.1 <- mean.Y + Y.val.hat 
+plot(Y.val.noscale.hat.1,Y.val.noscale,asp=1)
+abline(a=0,b=1,col=2)
+plot(Y.val.noscale.hat,Y.val.noscale.hat.1,asp=1)
+abline(a=0,b=1,col=2)
+
+# prediction in the prediction set to predict the survival time of people already dead
+# a) No centering, no scaling
+
+Y.noscale.hat <- predict(lasso.2,newx=X.noscale,type = "response",s=cv.lasso.2$lambda.min)
+plot(Y.noscale.hat,Y.noscale,asp=1)
+abline(a=0,b=1,col=2)
+# b) from the fitted model centering and scaling
+Y.hat <- predict(lasso.1,newx=X.scale,type = "response",s=cv.lasso.1$lambda.min)
+Y.noscale.hat.1 <- mean.Y + Y.hat 
+plot(Y.noscale.hat.1,Y.noscale,asp=1)
+abline(a=0,b=1,col=2)
+plot(Y.noscale.hat,Y.noscale.hat.1,asp=1)
+abline(a=0,b=1,col=2)
+
+
+# prediction in the prediction set to predict the survival time of people still alive
+# a) No centering, no scaling
+#Y.val.noscale <- log.surv.death
+Y.val.noscale.hat <- predict(lasso.2,newx=X.val.scale,type = "response",s=cv.lasso.2$lambda.min)
+#Y.val.noscale.hat <- predict(lasso.2,newx=X.val.scale,type = "response",s=cv.lasso.2$lambda.1se)
+plot(Y.val.noscale.hat,Y.val.noscale,asp=1)
+abline(a=0,b=1,col=2)
+# b) from the fitted model centering and scaling
+Y.val.hat <- predict(lasso.1,newx=X.val.scale,type = "response",s=cv.lasso.1$lambda.min)#1se)
+Y.val.noscale.hat.1 <- mean.Y + Y.val.hat 
+plot(Y.val.noscale.hat.1,Y.val.noscale,asp=1)
+abline(a=0,b=1,col=2)
+plot(Y.val.noscale.hat,Y.val.noscale.hat.1,asp=1)
+abline(a=0,b=1,col=2)
+```
+## 2.3 Consider the set $S_0$ of non-zero estimated Lasso coefficients. Use OLS to fit a regression model with response 'log.surv' and explanatory variables. (The columns of 'expr' with indeces in $S_0$). Plot the observed values for the response variable against the OLS fitted values 
+```{r}
+# 3 Consider the set S0 of non-zero estimated Lasso coefficients. Use OLS to fit a regression model with response log.surv and explanatory variables 
+# The columns of expr with indexes in S0
+# Plot the observed values for the response variable against the OLS fitted values
+# OLS: lambda = 1e-5
+beta_OLS = solve(t(X.scale)%*%X.scale+1e-5*diag(1,p))%*%t(X.scale)%*%Y.scale
+# Lasso coefficients
+S0 = coefficients.1.lambdamin[coefficients.1.lambdamin[,1]!=0,]
+```
+## 2.4 Compare the OLS and Lasso estimated coefficient. Compare the OLS and Lasso fitted values Do a plot for that.
+
+```{r}
+
+```
+
+
