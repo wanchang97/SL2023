@@ -16,6 +16,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Try to provide an inerpretation to the estimated model
 library(Hmisc)
 library(glmnet)
+load("boston.Rdata")
 #select only the variable of interest to the model, in the order desired:
 boston = boston.c[c("CRIM","ZN","INDUS","CHAS","NOX","RM","AGE","DIS","RAD","TAX","PTRATIO","B","LSTAT","MEDV")]
 labs = list(
@@ -47,7 +48,7 @@ X = cbind(X1,as.numeric(boston$CHAS)-1)
 p = dim(X)[2]
 n = dim(X)[1]
 # Nonscaled data
-Y.noscale = scale(boston$MEDV,center = FALSE,scale=FALSE)
+Y.noscale = boston$MEDV#scale(boston$MEDV,center = FALSE,scale=FALSE)
 X1.noscale = scale(boston[,c(-4,-14)],center=FALSE,scale=FALSE)
 X.noscale = cbind(X1.noscale,as.numeric(boston$CHAS)-1)
 #X.noscale = scale(boston[,c(-14)],center=FALSE,scale=FALSE)#as.matrix(boston[,c(-14)])
@@ -175,6 +176,9 @@ Y.val.noscale <- log.surv.live
 X.val.scale <- scale(X.val.noscale,center=TRUE,scale=TRUE)
 Y.val.scale <- scale(Y.val.noscale,center=TRUE,scale=TRUE)
 n.val <- dim(X.val.scale)
+mean.Y.val <- mean(Y.val.noscale)
+mean.X.val <- apply(X.val.noscale,2,mean)
+sd.X.val <- apply(X.val.noscale,2,sd)
 # Use glmnet and cv.glmnet to obtain the Lasso estimation for regressing log.surv against expr. How many coefficient different from zero are in the Lasso estimator?
 # Illustrate the result with two graphics
 
@@ -262,21 +266,23 @@ numberOfCoefficientsNonzero.2.lambda1se = length(coefficients.2.lambdamin[coeffi
 # prediction in the prediction set to predict the survival time of people still alive
 # a) No centering, no scaling
 Y.val.noscale <- log.surv.live
-Y.val.noscale.hat <- predict(lasso.2,newx=X.val.noscale,type = "response",s=cv.lasso.2$lambda.min)
+Y.val.noscale.hat <- predict(lasso.2,newx=X.val.scale,type = "response",s=cv.lasso.2$lambda.min)
 plot(Y.val.noscale.hat,Y.val.noscale,asp=1)
 abline(a=0,b=1,col=2)
 # b) from the fitted model centering and scaling
 Y.val.hat <- predict(lasso.1,newx=X.val.scale,type = "response",s=cv.lasso.1$lambda.min)
-Y.val.noscale.hat.1 <- mean.Y + Y.val.hat 
+Y.val.noscale.hat.1 <- mean.Y.val + Y.val.hat 
 plot(Y.val.noscale.hat.1,Y.val.noscale,asp=1)
 abline(a=0,b=1,col=2)
 plot(Y.val.noscale.hat,Y.val.noscale.hat.1,asp=1)
 abline(a=0,b=1,col=2)
+```
 
+```{r}
 # prediction in the prediction set to predict the survival time of people already dead
 # a) No centering, no scaling
 
-Y.noscale.hat <- predict(lasso.2,newx=X.noscale,type = "response",s=cv.lasso.2$lambda.min)
+Y.noscale.hat <- predict(lasso.2,newx=X.scale,type = "response",s=cv.lasso.2$lambda.min)
 plot(Y.noscale.hat,Y.noscale,asp=1)
 abline(a=0,b=1,col=2)
 # b) from the fitted model centering and scaling
@@ -286,7 +292,9 @@ plot(Y.noscale.hat.1,Y.noscale,asp=1)
 abline(a=0,b=1,col=2)
 plot(Y.noscale.hat,Y.noscale.hat.1,asp=1)
 abline(a=0,b=1,col=2)
+```
 
+```{r}
 
 # prediction in the prediction set to predict the survival time of people still alive
 # a) No centering, no scaling
@@ -297,7 +305,7 @@ plot(Y.val.noscale.hat,Y.val.noscale,asp=1)
 abline(a=0,b=1,col=2)
 # b) from the fitted model centering and scaling
 Y.val.hat <- predict(lasso.1,newx=X.val.scale,type = "response",s=cv.lasso.1$lambda.min)#1se)
-Y.val.noscale.hat.1 <- mean.Y + Y.val.hat 
+Y.val.noscale.hat.1 <- mean.Y.val + Y.val.hat 
 plot(Y.val.noscale.hat.1,Y.val.noscale,asp=1)
 abline(a=0,b=1,col=2)
 plot(Y.val.noscale.hat,Y.val.noscale.hat.1,asp=1)
@@ -310,13 +318,18 @@ abline(a=0,b=1,col=2)
 # Plot the observed values for the response variable against the OLS fitted values
 # OLS: lambda = 1e-5
 beta_OLS = solve(t(X.scale)%*%X.scale+1e-5*diag(1,p))%*%t(X.scale)%*%Y.scale
+beta_OLS
 # Lasso coefficients
-S0 = coefficients.1.lambdamin[coefficients.1.lambdamin[,1]!=0,]
+S0 = coef(lasso.2,s=cv.lasso.2$lambda.min)[-1] #coefficients.1.lambdamin#coefficients.1.lambdamin[coefficients.1.lambdamin[,1]!=0,]
 ```
 ## 2.4 Compare the OLS and Lasso estimated coefficient. Compare the OLS and Lasso fitted values Do a plot for that.
 
 ```{r}
-
+Y.val.hat.OLS = X.val.scale %*% beta_OLS 
+Y.val.hat.Lasso = X.val.scale %*% S0
+plot.new()
+plot(Y.val.hat.OLS,Y.val.hat.Lasso,asp=1)
+abline(a=0,b=1,col=2)
 ```
 
 
