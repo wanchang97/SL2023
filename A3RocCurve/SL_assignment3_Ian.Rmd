@@ -1,0 +1,174 @@
+---
+title: "SL_assignment3_test"
+author: "Ian Wallgren"
+date: "2023-03-05"
+output: pdf_document
+---
+
+---
+title: "SL_assignment3_test"
+author: "Ian Wallgren"
+date: "2023-03-05"
+output: pdf_document
+---
+
+# 1. Use the script spam.R to read the data from the SPAM e-mail database.
+
+```{r}
+library(glmnet)    
+#path name
+import_path = "~/Desktop/UPC/Courses/SL/"
+
+#importing necessary data
+spam_data = read.csv(paste(import_path,"spam.R",sep = ""))
+
+spam = read.table(paste(import_path,"spambase.data",sep = ""),sep=",")
+
+spam_names = c(read.table(paste(import_path,"spambase.names",sep = ""),sep=":",skip=33,nrows=53,as.is=TRUE)[,1],
+                "char_freq_#",
+                read.table(paste(import_path,"spambase.names",sep = ""),sep=":",skip=87,nrows=3,as.is=TRUE)[,1],
+                "spam.01")
+
+#setting the correct names
+names(spam) = spam_names 
+
+n<-dim(spam)[1]
+p<-dim(spam)[2]-1
+
+#this is the response (can take only values 0 or 1)
+spam_lastcol <- spam[,p+1]
+
+#these are the explanatory variables
+spam_vars <- as.matrix(spam[,1:p])
+
+#39% percent appears to be spam emails (this is the entire set)
+cat(paste("n = ",n,', p = ',p,sep=""))
+cat(paste("Proportion of spam e-mails =",round(mean(spam_lastcol),2),sep=""))
+
+```
+
+# 2. Divide the data into two parts: 2/3 for the training sample, 1/3 for the test sample. You should do it in a way that SPAM e-mail are 2/3 in the training sample and 1/3 in the test sample, and that the same happens for NO SPAM e-mails.
+
+```{r}
+
+#not sure why last col is not renamed, not a big deal tho
+#this is both x and y data, which is the way we want it atm in order to sample it to train and test without messing up the order. In order to make sure we get 2/3 of the training set to be spam emails, we first check what the ratio is atm, if it is around 66% we can just shuffle the deck manually since the number of observations is big enough (law of large numbers)
+
+#currently this is around 60% --> it is not enough to shuffle the deck before re-sampling it to train and test sets, we need to fix this manually.
+nmr_spam = length(all_data[,58][all_data[,58]!=1])
+
+#we select all cols with last col with element 1, and vice versa where last col has element 0, and from here we divide into train and test and then concatenate the sets as we desire
+#spam indices
+
+all_data_spam   = all_data[all_data$spam.01 == 1,]
+all_data_nospam = all_data[all_data$spam.01 == 0,]
+
+#divide both sets into train and test and then concatenate them
+
+length_spam    = dim(all_data_spam)[1]
+length_nospam  = dim(all_data_nospam)[1]
+
+train_idx_spam   = sample(1:length_nospam,0.67*length_nospam)
+train_idx_nospam = sample(1:length_nospam,0.67*length_nospam)
+
+
+#training ste
+all_data_spam_train = na.omit(all_data_spam[train_idx_spam,])
+all_data_nospam_train = na.omit(all_data_nospam[train_idx_nospam,])
+
+#testing set
+all_data_spam_test = na.omit(all_data_spam[-train_idx_spam,])
+all_data_nospam_test = na.omit(all_data_nospam[-train_idx_spam,])
+
+train_x = rbind(all_data_spam_train[,-58],all_data_nospam_train[,-58])
+train_y = rbind(as.matrix(all_data_spam_train[,58]),as.matrix(all_data_nospam_train[,58]))
+
+test_x = rbind(all_data_spam_test[,-58],all_data_nospam_test[,-58])
+test_y = rbind(as.matrix(all_data_spam_test[,58]),as.matrix(all_data_nospam_test[,58]))
+
+```
+
+# 3. Consider the following three classification rules:
+
+### Logistic regression fitted by maximum likelihood (IRWLS, glm).
+
+```{r}
+
+#omitting some NaN vals that appeared when I seperated the training and testing sets (not too used with R)
+train = data.frame(cbind(train_x,train_y))
+
+#dimenstions of the data frame
+n=dim(spam)[1]
+p=dim(spam)[2]-1
+
+#this is the response (can take only values 0 or 1)
+spam_lastcol = as.matrix(train[,p+1])
+
+#these are the explanatory variables
+spam_vars = as.matrix(train[,1:p])
+
+#this is as we expected, we are able to perfectly distinguish the response variable into 0s and 1s --> should lead to overfitting when running the classifier on the test data!
+#therefore we can try to utilise the penalized version instead
+glm_spam = glm(spam_lastcol ~ spam_vars,data=train,family=binomial())
+#summary(glm_spam)
+
+betas_glm_spam = coef(glm_spam)
+prediction_glm_spam = predict(glm_spam,newx=as.matrix(test_x))
+plot(prediction_glm_spam)
+```
+
+
+### Logistic regression fitted by Lasso (glment).
+```{r}
+
+#since glmnet input args is a bit different we need to input train_x and train_y seperately
+
+
+#not 100% about which measure to use, could be deviance as well 
+#set alpha=1 to employ LASSO regression
+
+#something is messed up with the train_x set, not sure why
+glmnet_spam = glmnet(train_x,train_y,standardize=TRUE, intercept=TRUE,type.measure="mse",alpha=1,family="binomial")
+glmnet_spam_prediction = predict(glmnet_spam,newx=as.matrix(test_x),s=glmnet_spam$lambda.1se,type="class")
+
+#fix the plotting part
+plot(glmnet_spam_prediction,test_y)
+
+
+Y.val.no.scl <- prostate$lpsa[val.sample]
+Y.val.no.scl.hat <- predict(lasso.2,newx=as.matrix(prostate[val.sample,1:8]),s=cv.lasso.2$lambda.1se)
+plot(Y.val.no.scl.hat,Y.val.no.scl,asp=1)
+```
+
+### k-nn binary regression (you can use your own implementation or functions knn and knn.cv from the R package class).
+
+```{r}
+#takes long time to run this chunk, try fewer repeats
+#install.packages("caret")
+library(caret)
+tr_control = trainControl(method="repeatedcv",number=10,repeats=3)
+
+#fit_knn = train(as.factor(train_y)  ~ .,
+#                data = train,
+#                method='knn',
+#                tuneLength=20,
+#                trControl=tr_control,
+#                preProc=c("center","scale"))
+
+#install.packages("mltools")
+library(class)
+
+#predict_knn = knn(train_x,test_x,train_y,k=10)
+
+```
+
+# 4. Use the test sample to compute and plot the ROC curve for each rule.
+
+```{r}
+##each rule --> each of the above regressions
+
+library(pROC)
+roc(test_y,)
+
+
+```
