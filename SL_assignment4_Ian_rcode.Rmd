@@ -1,0 +1,171 @@
+---
+title: "SL_assignment4_Ian"
+author: "Ian Wallgren"
+date: "2023-03-10"
+output: pdf_document
+---
+
+
+##### Preprocessing data set
+
+```{r}
+
+
+library(sm)
+data(aircraft)
+help(aircraft)
+Yr       = aircraft$Yr
+lgPower  = log(aircraft$Power)
+lgSpan   = log(aircraft$Span)
+lgLength = log(aircraft$Length)
+lgWeigth = log(aircraft$Weight)
+lgSpeed  = log(aircraft$Speed)
+lgRange  = log(aircraft$Range)
+
+```
+
+
+## Assignment description
+
+Consider the heteroscedastoc model $Y = m(x) + \sigma(x)\epsilon = m(x) + e$, \\\
+where $E(\epsilon) = 0, V(\epsilon) = 1$, and $\sigma^2(x)$ is an unknown function that gives the conditional variance of $Y$ given that the explanatory variable is equal to $x$. Then \\\
+$$ Z = log\sigma^2(x)+\delta$$, and $\delta = log\epsilon^2$ is a random variable with expected value close to $0$.
+
+Given that the values of $e_{i}^2$ are not observable, a way to estimate the function $\sigma^2(x)$ is as follows:
+
+1. Fit a non-parametric regression to data $(x_{i},y_{i}$) and save the estimated values $\hat{m}(x_{i})$.
+
+2. Transform the estimated residuals $\hat{e}_{i}^2 = y_{i} - \hat{m}(x_{i}):$
+$$ z_{i} = log\hat{e}_{i}^2 = log[(y_{i}-\hat{m}(x_{i}))^2]$$.
+
+3. Fit a non-parametric regression to data $(x_{i},z_{i})$ and call the estimated function $\hat{q}(x)$. Observe that $\hat{q}(x)$ is an estimate of $log\sigma^2(x)$.
+
+4. Estimate $\sigma^2(x)$ by
+$$\hat{\sigma}^2(x) = e^{\hat{q}(x)}$$.
+
+Apply this procedure to estimate the conditional variance lgWeight (variable $Y$) and Yr (variable $x$). Draw a graphic of $\hat{e}_{i}^2$ against $x_{i}$ and superimpose the estimated function $\hat{\sigma}^2(x)$. Lastly draw the function $\hat{m}(x)$ and superimpose the CI bands. 
+
+
+## Assignment solution
+
+
+Plotting the response variable Yr vs. each explanatory variable.
+
+```{r}
+op<-par(mfrow=c(3,2))
+plot(Yr,lgPower)
+plot(Yr,lgSpan)
+plot(Yr,lgLength)
+plot(Yr,lgWeight)
+plot(Yr,lgSpeed)
+plot(Yr,lgRange)
+par(op)
+```
+Plotting Yr against the log of the variable we are interested in:
+```{r}
+
+plot(Yr,lgWeight) 
+
+```
+
+
+
+Now, we want to fit our non-parametric regression and produce our estimated values for each t (the regression function at $x=t$ will reduce to the intercept of the regression function. Hence, our fitted curve will be a line through all these intercepts [i.e. one intercept for each t we choose to fit a regression to]). To this end, we try a couple of different bandwidths as well as different values of q (that is, a linear, a quadratic as well as a cubic local non-parametric regression).
+
+```{r}
+
+#notice that Yr is our explanatory variable, and lgWeight is our response variable
+
+#for h = 10, we vary the degree of our local polynomial
+op <- par(mfrow=c(1,3))
+res0 <- locpolreg(x=Yr,y=lgSpeed,h=10,q=0,r=0,main="q=0,h=10",type.kernel="epan")
+res1 <- locpolreg(x=Yr,y=lgSpeed,h=10,q=1,r=0,main="q=1,h=10",type.kernel="epan")
+res2 <- locpolreg(x=Yr,y=lgSpeed,h=10,q=2,r=0,main="q=2,h=10",type.kernel="epan")
+par(op)
+```
+
+Now we want to estimate what a good h would be using our intuition. We know that the explanatory variable is year of the first manufacture, and the response variable is (log of, but it doesn't really matter for this intuitive part) maximum take-off weight. So what would our intuition tell us? First of all, it is clear that the points defined in a specific neighbourhood of an arbitrarily point x  (which is the year of the first manufactured aircraft) should be better predictive of unobserved values in this neighbourhood - clearly, the maximum take-off weight of a plane manufactured 80 years later will not tell us as much about the maximum take-off weight of the point we are trying to estimate as aircrafts first manufactured around the same time. Intuitively, as we have already used 10 years, it would no be foolish to assume that a change in the maximum take-off weight of an aircraft occurs every 15 years (this change is probably not discrete but continuous, which is taken care of as we use a kernel smoothing method to assign weights to our neighbouring points in the regression function centered at x = t). This h should be a good initial guess, indeed, when doing a little research on the general depreciation time of an airplane, this number is between 15-25 years. We give a note about the fact that this span of 5 years arguably has been subject to change across this 80 year time interval - ultimately this would depend on the state of the economy, or other factors such as closeness in time to a certain war (when proportionally more resources of the economy was put into the aircraft industry).
+
+
+```{r}
+
+#h=15
+op <- par(mfrow=c(1,4))
+res0 = locpolreg(x=Yr,y=lgSpeed,h=15,q=0,r=0,main="q=0,h=10",type.kernel="epan")
+res1 = locpolreg(x=Yr,y=lgSpeed,h=15,q=1,r=0,main="q=1,h=10",type.kernel="epan")
+res2 = locpolreg(x=Yr,y=lgSpeed,h=15,q=2,r=0,main="q=2,h=10",type.kernel="epan")
+res3 = locpolreg(x=Yr,y=lgSpeed,h=15,q=3,r=0,main="q=3,h=10",type.kernel="epan")
+par(op)
+```
+As expected, setting $h=15$ makes our fitted curve a little less responsive and therefore has a bit more smooth shape. By observing the inner workings of the logpolreg function, we see that, if nothing else is specified, we do as many local regressions as we have observations in our explanatory variable. Therefore, the total amount of fitted values of our fitted curve is 709. Also, referring to literature on the subject of local polynomial regression, we chosse to discard our local linear (polynomial of degree 1) regression version, as well as the cubic version as it is advised to go for an odd degree of the local polynomials. By this reasoning, we choose to make another attempt at fitting the data (to avoid potential overfitting, we have not taken this decision by observing which of our models that appears to be the best fit), this time we set $q=3$.
+
+```{r}
+
+#note that plotting the fitted line is done by default in the locpolreg function. The important thing here is that we save our data in a variable.
+model_q3_h15 = locpolreg(x=Yr,y=lgWeight,h=15,q=3,r=0,main="q=3,h=15",type.kernel="epan")
+#selecting our fitted values from the model
+fitted_vals  = model_q3_h15[1][[1]]
+
+```
+
+
+Indeed, this version, with $q=3,h=15$ seems to be a good choice. And note that the selection of these parameters, $q,h$, is done by doing an economical hypothesis (avg. length of depreciation of a aircrafts), and by researching literature on the subject of local polynomial regression, respectively. Hence, we have created a buffer against unconciously overfitting our model. Such measures increases our chances of being successful in the generalization of our model.
+
+Next step in the suggested procedure is to transform our estimated residuals. To this end, it is quite convenient that the default number of local regressions were equal to the number of observations in our explanatory variable - indeed, now we can easily calculate our estimated residuals as $\hat{\epsilon_{i}} = y{i}-\hat{m}(x_{i}))$.
+
+```{r}
+
+#Calculate estimated residuals
+e_hat = as.matrix(lgWeight) - as.matrix(fitted_vals)
+
+#Transform the estimated residuals
+z     = log(e_hat^2)
+
+```
+
+
+The next step is to fit a non-parametric regression to $(z_{i},x_{i})$. Intuitively, it should be a good idea to use the same parameters as before, namely $q=3,h=15$.
+
+```{r}
+
+q = locpolreg(x=Yr,y=z,h=15,q=0,r=0,main="q=3,h=15",type.kernel="epan")
+
+```
+We observe that we have now actually estimated $log\sigma^2(x)$ by our fitted values in $q$. Hence, the next step is to estimate merely $\hat{\sigma}^2(x)$ by $e^q$.
+
+```{r}
+
+#calculating our _estimated_ sigma square
+sigma_square = exp(q[[1]])
+
+#plotting our estimation of sigma square versus the explanatory variable.
+plot(Yr,sigma_square)
+```
+We can see that our estimated sigma square varies through are data set. Clearly, it is much lower in the beginning than it is towards the end. We note that our response variable was the logarithm of Weight, so there would not be any clear reason for this behavior. Had we not done this pre-processing, we would expect this sort of pattern in our estimated sigma square.
+
+
+Lastly, we want to plot our fitted values and add an upper and lower "bound" (not really a bound, but in lack of a better word... maybe soft bound?), namely a $95%$ confidence interval, by the estimated standard deviation (sigma) at each point $t$ (i.e. square-root of the estimated sigma square).
+
+```{r}
+
+sigma = sqrt(sigma_square)
+
+#quick plot check
+plot(Yr,sigma)
+
+upper_bound = lgWeight + 1.96 * sigma
+lower_bound = lgWeight - 1.96 * sigma
+
+
+plot(Yr,upper_bound,col='green',ylim = c(4, 16))
+title('Yr vs. lgWeight, with 95% confidence interval')
+points(Yr,lower_bound,col='red')
+points(Yr,lgWeight, col='black')
+legend("topleft",c("Upper - green","Lower - red","Fitted - black"))
+
+```
+
+
+
+
+
