@@ -1,0 +1,446 @@
+---
+title: 'Assignment 3: Binary Classification'
+subtitle: Ian Wallgren, Wanchang Zhang, Lavinia Hriscu, Victor Jimenez
+output:
+  pdf_document:
+    toc: no
+  html_document:
+    fig_caption: yes
+    toc: no
+    number_sections: no
+    toc_float:
+      collapsed: yes
+    code_folding: hide
+    theme: spacelab
+    highlight: tango
+    fig_width: 10
+    fig_weight: 10
+  word_document:
+    toc: no
+---
+
+```{r setup, include=0}
+knitr::opts_chunk$set(echo = TRUE)
+set.seed(123)
+```
+
+In this assignment we are asked to implement three different classification methods for binary categorical data. We will work with a SPAM e-mail database that contains the frequency of different words and characters on every message and a binary target value with its true label: SPAM or not SPAM.
+
+Upon new e-mails, our predictor should be able to automatically decide whether to send them to the SPAM box or not. The specificity and sensitivity of the different rules will be compared.
+
+# Reading the SPAM e-mail database
+
+The code for reading the data was provided by the professor. The loaded database contains 4601 e-mails among which 39% are SPAM.
+
+```{r, echo=FALSE}
+
+spam <- read.table("spam_database/spambase.data",sep=",")
+
+spam.names <- c(read.table("spam_database/spambase.names",sep=":",skip=33,nrows=53,as.is=TRUE)[,1],
+                "char_freq_#",
+                read.table("spam_database/spambase.names",sep=":",skip=87,nrows=3,as.is=TRUE)[,1],
+                "spam.01")
+
+names(spam) <- spam.names 
+
+n<-dim(spam)[1]
+p<-dim(spam)[2]-1
+
+spam.01 <- spam[,p+1]
+spam.vars <- as.matrix(spam[,1:p])
+
+cat(paste("n = ",n,', p = ',p,sep=""))
+cat(paste("\nProportion of spam e-mails =",round(mean(spam.01),2),sep=" "))
+```
+
+# 2. Generating training and test sets
+
+The target binary variable is `spam.01`. We will divide the database in a way that 1/3 of emails tagged as SPAM and 1/3 of emails tagged as not SPAM will be used as a test set. The remaining data will be used as a test set.
+
+```{r}
+# For SPAM emails:
+spam.1 = which(spam$spam.01 == 1)
+n.1 = length(spam.1)
+train.ind.1 = sample(1:n.1, size = round(2/3 * n.1), replace = FALSE)
+test.ind.1 = setdiff(1:n.1, train.ind.1)
+
+# For non-SPAM emails:
+spam.0 = which(spam$spam.01 == 0)
+n.0 = length(spam.0)
+train.ind.0 = sample(1:n.0, size = round(2/3 * n.0), replace = FALSE)
+test.ind.0 = setdiff(1:n.0, train.ind.0)
+
+# Now we combine:
+train.ind = c(train.ind.1, train.ind.0)
+test.ind = c(test.ind.1, test.ind.0)
+
+# Check:
+length(train.ind) + length(test.ind)
+100*length(train.ind)/(length(train.ind) + length(test.ind))
+```
+
+For convenience, we will work with sub-matrices of the dataset containing the training and the test observations.
+
+```{r}
+# Train dataset
+Xtr = as.matrix(spam[train.ind, -(p+1)])
+ytr = as.matrix(spam[train.ind, p+1])
+# Test dataset
+Xte = as.matrix(spam[test.ind, -(p+1)])
+yte = as.matrix(spam[test.ind, p+1])
+```
+
+# 3. Classification of the data
+
+We will use three different classification methods to classify the e-mails. As a binary variable, $y|X_i = x_i$ can be described by a Bernoulli process with probability of success $E(y|X_i = x_i)$. The methods described in this assignment are based in the estimation of the probability of the e-mail to be considered SPAM, or equivalently:
+
+$$
+g_S(x) = \hat{Pr}(y=1 | X=x)
+$$
+
+For each method, a classification rule will be determined by the cut point parameter $c \in [0,1]$:
+
+$$
+h_S(x) = 
+\begin{cases} 
+      0 & \text{if } g_S(x) \leq c \\
+      1 & \text{if } g_S(x) > c
+\end{cases}
+$$
+
+## 3.1 Logistic regression --- IRWLS
+
+The first classification will be performed by fitting the data to a logistic model using iteratively re-weighted least squares method. The function performing `IRWLS` has been provided by the professor. This function trains the model with the inputs `x` (explanatory) and `y` (target) and estimates the $E(y=1|X=x)$ for the observations `x.new`, providing as an output $g_S($`x.new`$)$.
+
+```{r, echo=FALSE}
+# Auxiliary function
+p.from.beta <- function(beta,x){
+  lin.term <- beta[1] + x %*% beta[-1]
+  e.lt <- exp(lin.term)
+  p <- e.lt/(1+e.lt)
+  return(list(p=p,lt=lin.term))
+}
+
+logistic.IRWLS <- function(x,y,weights.out=1,x.new=x,
+                           max.iter=10,eps.beta=1e-5,
+                           plts=FALSE){
+  if (plts&(dim(as.matrix(x))[2]>1)){
+    plts<-FALSE
+    warning("Plots are valid only when dim(x)[2]==1")
+  }
+  # Step 0
+  stop.rule <- FALSE
+  iter <- 0
+  beta.0 <- coef(lm(y~x)) 
+  
+  while (!stop.rule){
+    iter <- iter + 1 
+    # step 1
+    p.lt <- p.from.beta(beta.0,x)
+    p <- p.lt$p
+    lt <- p.lt$lt
+    ps.e <- (y-p)/(p*(1-p))
+    z <- lt + ps.e 
+    wt <- p*(1-p) *weights.out
+    
+    if (plts){
+      op<-par(mfrow=c(1,2))
+      plot(x,y,cex=8*wt)
+      lines(x,p,col=2)
+      plot(x,z,cex=8*wt)
+      lines(x,lt,col=2)
+      par(op)
+    }
+    
+    lm.1 <- lm(z~x,weights = wt) 
+    beta.1 <- coef(lm.1)
+    
+    # checking stop rules
+    if ((iter>=max.iter)|(sum((beta.1-beta.0)^2)<eps.beta)){
+      stop.rule<-TRUE
+    } else {
+      beta.0 <- beta.1
+    }
+  }
+  
+  aux <- summary(lm.1)
+  p.lt <- p.from.beta(beta.1,x)
+  p <- p.lt$p
+  lt <- p.lt$lt
+  se.beta <- diag(aux$cov.unscaled)^.5
+  null.devi <- sum(-2*dbinom(y,1,mean(y),log=TRUE))
+  resid.devi <- sum(-2*dbinom(y,1,p,log=TRUE))
+  
+  return(list(coefficients=beta.1, se.coef=se.beta,
+              fitted.values=p,linear.predictors=lt,
+              predicted.values=p.from.beta(beta.1,x.new)$p,
+              null.deviance=null.devi,
+              residual.deviance=resid.devi)
+         )
+} 
+```
+
+```{r}
+class.IRWLS = logistic.IRWLS(x=Xtr, y=ytr, weights.out=1, max.iter=10, eps.beta=1e-5)
+```
+
+## 3.2 Logistic regression --- Lasso
+
+A fit to the logistic model can also be performed by lasso, by means of the `glmnet` function with `alpha=1`. First, we will perform cross-validation to determine the best value of the shrinkage parameter $\lambda_{min}$, and then fit the model with it.
+```{r, include=FALSE}
+library(glmnet)
+```
+
+
+```{r, warning=FALSE}
+cv.lasso = cv.glmnet(Xtr, ytr, alpha=1, family='binomial') # cross-validation
+class.lasso = glmnet(Xtr, ytr, alpha=1, family = "binomial", lambda = cv.lasso$lambda.min)
+cv.lasso$lambda.min
+```
+
+```{r, echo=FALSE, out.width='70%', fig.align='center'}
+plot(cv.lasso)
+```
+
+## 3.3 Binary regression --- K-NN
+
+Finally, the $k$-nearest neighbors classification method will be tested, by means of the function `knn` of the library class. We will first perform cross-validation with knn.cv to determine the reach of the classification of the points. The best $k$ will be chosen so to provide the maximum accuracy of the model $A = Pr(1|1) + Pr(0|0)$; that is, the maximum proportion of correct classifications in the training set .
+
+In order to minimize ties, it's better to use an odd number of K-nearest neighbors, that is why a sequence between 1 and 21, with steps of 2, is tried in this case.
+```{r, include=FALSE}
+library(class)
+```
+
+```{r}
+kval <- seq(1,21,2)
+knn.accuracy = numeric(length(kval))
+i <- 1
+for (k in kval){
+  knn.cv.k = knn.cv(spam[,-ncol(spam)], cl=spam$spam.01, k = k)
+  conf_matrix = table(knn.cv.k, spam$spam.01)
+  knn.accuracy[i] = sum(diag(conf_matrix))/sum(conf_matrix)
+  i <- i+1
+}
+
+```
+
+```{r, echo=FALSE, out.width='70%', fig.align='center'}
+plot(kval, knn.accuracy, main="K-NN Accuracy as function of K",
+     xlab='K', ylab='Accuracy (%)')
+lines(kval, knn.accuracy)
+maxpos = which.max(knn.accuracy[-1]) 
+knn.cv.kbest = kval[maxpos+1]
+points(knn.cv.kbest, knn.accuracy[maxpos+1], col=2, pch=16)
+abline(v=knn.cv.kbest, lty=2, col=2)
+```
+We will discard the value $K=1$, as it can lead to overfitting.
+
+Now we can perform the classification. In contrast with the former example, we are required to demand `prob=TRUE` so that the probability for the classification of each point is provided. In order to obtain $g_S(x)$, which is the probability of the classification as SPAM, we will have to operate for the classified as non-SPAM:
+
+$$
+\hat{P}(Y=1|X=x) = 1 - \hat{P}(Y=y|X=x) \biggr \rvert_{y=0}
+$$
+
+```{r}
+class.knn = knn(Xtr, Xte, ytr, k = knn.cv.kbest, prob=TRUE)
+prob.knn = attr(class.knn, "prob") # P(Y=y|X=x)
+class.knn = as.numeric(class.knn)-1 # encode it to 0/1
+
+ypre.knn = prob.knn
+ypre.knn[which(class.knn == 0)] = 1 - prob.knn[which(class.knn == 0)]
+```
+
+
+```{r, echo=FALSE}
+to_check = cbind(prob.knn, ypre.knn, class.knn, yte)
+to_show = data.frame(to_check[which(to_check[,3] != to_check[,4]),])
+colnames(to_show) = c("Pr(Y=y)", "Pr(Y=1)", "k-NN class.", "True class.")
+head(to_show)
+```
+
+# 4. ROC curve for each method
+
+In order to provide metrics and compare the behavior of the algorithms, we will use the test subset (`Xte` and `yte`) to obtain the cross-table between the real and the predicted classifications, also known as confusion matrix $M$. Then, the proportion of false positives ($1|0$) $M_{01}/(M_{00}+M_{01})$ or *precision (P)* against the proportion of true positives ($1|1$) $M_{11}/(M_{10}+M_{11})$ or *recall (R)* will be plotted by varying the value of $c$, so that the behavior of the method under different rules can be obtained. The ROC curve can be expressed as follows:
+
+$$
+\{ \text{P}(c), \text{R}(c) : c \in [0,1] \}
+$$
+
+If the model was perfect, $c=0.5$ would imply $P=0$ and $R=1$, and any value above or below that would make the recall to decrease or the precision to increase, respectively. The best method will thus be that one closer to the ideal ROC, that has area under the curve (AUC) equal to one.
+
+We will plot the ideal curve over the predicted ROC for each of our methods. We will use the `pROC` package, which plots instead the *specificity* (1-$P$) and the *sensitivity* ($R$) of the method.
+
+```{r warning=FALSE, include=FALSE}
+library(pROC)
+```
+
+## 4.1 Logistic regression --- IRWLS
+
+We will use the same function as before, but now also providing the explanatory set of test observations as `x.new=Xte`. The regression model will be fitted with the training data and the predicted values `ypre.IRWLS` will be compared with the true classification of the test set to provide the metrics.
+
+```{r warning=FALSE}
+ypre.IRWLS = logistic.IRWLS(x=Xtr, y=ytr, x.new=Xte, weights.out=1, max.iter=10, eps.beta=1e-5)
+IRWLS.roc = roc(as.numeric(yte), ypre.IRWLS$predicted.values)
+```
+
+```{r, echo=TRUE, out.width='70%', fig.align='center'}
+plot(IRWLS.roc, print.thres = "best", print.auc = TRUE, main = "ROC curve for IRWLS rule", xlim=c(1,0), ylim=c(0,1))
+segments(1,0,1,1, col=2, lty=2)
+segments(1,1,0,1, col=2, lty=2)
+```
+
+The method seems to perform slightly better at $c < 1/2$, as the proportion of false positives does not reach zero unless $c$ is way bigger than $1/2$, which indicates that the model tends to over-estimate the probability of the e-mail to be classified as SPAM. In spite of this slight bias, the classification is quite correct, as $AUC=0.978$ is close to one.
+
+## 4.2 Logistic regression --- Lasso
+
+We will use the `predict` function with `newx=Xte` to obtain the predicted probabilities. The ROC curve will be plotted as before.
+
+```{r, warning=FALSE}
+ypre.lasso = predict(class.lasso, newx=Xte, s=class.lasso$lambda.min, type='response')
+lasso.roc = roc(as.numeric(yte), ypre.lasso)
+```
+
+```{r, echo=FALSE, out.width='70%', fig.align='center'}
+plot(lasso.roc, print.thres = "best", print.auc = TRUE, main = "ROC curve for lasso rule", xlim=c(1,0), ylim=c(0,1))
+segments(1,0,1,1, col=2, lty=2)
+segments(1,1,0,1, col=2, lty=2)
+```
+
+As observed in the IRWLS regression, the classification seems to be somewhat biased towards the SPAM label. Nevertheless, $AUC=0.977$, only slightly below the value of the last method.
+
+## 4.3 Binary regression --- K-NN
+
+The estimated probabilities of the $k$-NN method were already computed.
+
+```{r, warning=FALSE}
+knn.roc = roc(as.numeric(yte), as.numeric(class.knn))
+```
+
+```{r, echo=FALSE, out.width='70%', fig.align='center'}
+plot(knn.roc, print.thres = "best", print.auc = TRUE, main = "ROC curve for 3-NN rule", xlim=c(1,0), ylim=c(0,1))
+segments(1,0,1,1, col=2, lty=2)
+segments(1,1,0,1, col=2, lty=2)
+```
+
+In contrast with the previous two methods, five-nearest-neighbors classification does not seem to provide adequate results on the test set. $AUC = 0.727$ is well below the ideal value, as the model seems to over-predict SPAM emails.
+
+# 5. Classification metrics for $c=1/2$
+
+In order to apply the classification rule $h_S(x)$ with $c=1/2$ we will define a round function that takes every value below $c$ to zero and every value above or equal to $c$ to one.
+
+```{r}
+round2 = function(x, digits) {
+  posneg = sign(x)
+  z = abs(x)*10^digits
+  z = z + 0.5 + sqrt(.Machine$double.eps)
+  z = trunc(z)
+  z = z/10^digits
+  z*posneg
+}
+round2(c(0.49999, 0.50000, 0.50001), 0)
+```
+
+Then, the predicted classification `ypre.?` over the test dataset will be compared with the real labels `yte` and some metrics will be provided:
+
+-   The confusion matrix $M$, as the cross-table between `ypre.?` and `yte`.
+
+-   The misclassification rate, as the anti-trace of $M$ divided by the number of observations.
+
+-   The $F$-score of the classification, defined as the harmonic mean between the precision and recall of the method.
+
+```{r}
+metrics = function(y_pred, y_test){
+  conf_matrix = table(y_pred, test=y_test)
+  print(conf_matrix)
+  
+  precision = conf_matrix[1,1]/sum(conf_matrix[,1])
+  recall = conf_matrix[1,1]/sum(conf_matrix[1,])
+  f_score = 2*precision*recall/(precision+recall)
+  
+  cat("\n")
+  cat("Precision: ", precision, "\n")
+  cat("Recall: ", recall, "\n")
+  cat("F-score: ", f_score, "\n")
+  
+  misscl = sum(diag(conf_matrix[nrow(conf_matrix):1, ]))/length(y_test)
+  cat("Misclassification error: ", misscl*100, "% \n")
+}
+```
+
+## 5.1 Logistic regression --- IRWLS
+
+```{r}
+ypre.IRWLS.bin = round2(ypre.IRWLS$predicted.values,0)
+metrics(ypre.IRWLS.bin, yte)
+```
+
+## 5.2 Logistic regression --- Lasso
+
+```{r}
+ypre.lasso.bin = round2(ypre.lasso,0)
+metrics(ypre.lasso.bin, yte)
+```
+
+## 5.3 Binary regression --- K-NN
+
+```{r}
+ypre.knn.bin = round2(ypre.knn,0)
+metrics(ypre.knn.bin, yte)
+```
+
+By looking at these metrics we can claim that logistic regression (both by IRWLS and lasso) provides an acceptable classification with an error rate of around 5%, whereas $k$-NN method is not suitable for this problem, probably due to the high-dimensionality of the dataset.
+
+Regarding the differences between IRWLS and lasso regression, we already showed that both methods are slightly biased towards the classification as SPAM. With this particular test dataset, $AUC_{IRWLS} > AUC_{lasso}$. Even if the differences are small, IRWLS has the highest F-score and is shown to provide the lowest misclassification error.
+
+# 6. Compute $l_{val}$ for each rule
+
+A different way to evaluate a classification rule is by computing the log-likelihood function of the joint distribution of the $n$ binomial random variables corresponding to the observed data $(x_i, y_i)$, divided by $n$. If a validation set is available, the expression to calculate would be:
+
+$$
+l_{val}(g_S) = \frac{1}{m} \sum_{j=1}^m \left ( y_j^V \log g_s(x_j^V) + (1-y_j^V) \log (1-g_s(x_j^V)) \right )
+$$
+
+We will apply the following function to our `ypre.?` vectors, which correspond to $\log g_s(x_j^V)$. The main idea of the log-likelihood for a probabilistic model for binary classification is to sum up the logs of the predicted probabilities where the real response value is one, and add this to the sum of the logs(1-probabilities) when the real response was zero. In order to implement this idea, the first part of the formula is applied to the positions where `yte = 1` (i.e. which correspond to `y_j^V = 1`), and the second one to the parts where `yte = 0`.
+
+
+```{r}
+lval = function(y_val, y_pre){
+  m = length(y_val)
+  yval.ind <- which(yte==1)
+  mlval <- sum(log(y_pre[yval.ind])) + sum(log(1-y_pre[-yval.ind]))
+  return(mlval/m)
+}
+```
+
+## 6.1 Logistic regression --- IRWLS
+
+```{r}
+lval.IRWLS = lval(yte, ypre.IRWLS$predicted.values)
+lval.IRWLS
+```
+
+## 6.2 Logistic regression --- Lasso
+
+```{r}
+lval.lasso = lval(yte, ypre.lasso)
+lval.lasso
+```
+
+## 6.3 Binary regression --- K-NN
+
+```{r}
+lval.knn = lval(yte, ypre.knn)
+lval.knn
+```
+
+
+As seen before, the result of `knn` differs of the two other algorithms and this is reflected in the value of the log-likelihood. The fact that $l_{val}$ is computed to be `-Inf` in this case is because there are some observations $x_i$ with true value $y_i = 1$ which are being predicted with $g_S(x_i) \approx 0$, and equivalently for $y_i = 0$. Then the function calculates the logarithm of zero, which goes to `-Inf`.
+
+```{r}
+sum(yte[which(ypre.knn<0.0000001)])
+err.1 = yte[which(ypre.knn>0.9999999)]
+length(err.1) - sum(err.1)
+```
+
+
+

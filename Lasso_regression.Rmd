@@ -1,0 +1,304 @@
+---
+title: 'Assignment 2: Lasso Regression'
+subtitle: Ian Wallgren, Wanchang Zhang, Lavinia Hriscu, Victor Jimenez
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    fig_caption: yes
+    toc: no
+    number_sections: no
+    toc_float:
+      collapsed: yes
+    code_folding: hide
+    theme: spacelab
+    highlight: tango
+    fig_width: 10
+    fig_weight: 10
+  word_document:
+    toc: no
+---
+
+```{r,echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(seed = 1234)
+```
+
+In this assignment we will fit our data to a multiple linear regression model by means of a lasso regression. Considering $n$ pairs of observations $(x_i, y_i)$, where $x_i \in 	\mathbb{R}^p$ and $y_i \in \mathbb{R}$, the linear model is the following:
+
+$$ y_i = \beta_0 + \sum_{j=1}^p x_{ij} \beta_j + \epsilon_i $$
+
+where $\epsilon_i$ account for white noise and $\beta \in \mathbb{R}^{p+1}$ is the vector of coefficients of the model. By fitting the model, estimators for $\beta$ and $\sigma^2$ will be obtained and the object variables $y$ will be predicted from explanatory variables $x$ as $\hat{y}_i = x_i^T \hat{\beta}$.
+
+In general (OLS), the estimation of the coefficients is achieved by minimizing the square of the prediction error $\epsilon$. It can be proven (Gauss-Markov) that this method provides the MVUE estimator of $\beta$. In the case of lasso (Least absolute shrinkage and selection operator) regression, the penalization term that imposes a shrinkage in the estimated parameter vector $\hat{\beta}$ is the $L_1$-norm of the vector:
+
+$$
+\hat{\beta}_{lasso} = \arg \min_{\beta} \left \{ \frac{1}{2n} \sum_{i=1}^n \left ( y_i - \beta_0 - \sum_{j=1}^p x_{ij} \beta_j \right )^2 + \lambda \sum_{j=1}^p |\beta_j|  \right \}
+$$
+
+The greater the value of the penalization parameter $\lambda \geq 0$, the greater the amount of shrinkage of the estimator $\hat{\beta}_{lasso}$. Unlike ridge regression, where the penalty term was $\sum_{j=1}^p \beta_j ^ 2$ and the optimal parameter vector was the one that minimised the magnitude of its coefficients, the minimization problem in lasso regression allows $\hat{\beta}_{lasso}$ to be sparse, that is, to have certain number of components reduced to zero, depending on the magnitude of the shrinkage parameter $\lambda$. This difference, which can be studied in general for penalization terms using the $L_q$-norm, comes from the fact that the feasible region in the parameter space for ridge regression is a centered hyper-sphere, whereas in lasso regression is a centered hyper-cube with vertex aligned with the axis, meaning that the intersection between level curves of the objective function and the border of the feasible region (where the optimal lays) happens when some components are zero. $L_1$-norm is the lowest-order norm that allows the minimization problem to be convex.
+
+In some sense, the sparsity provided by the lasso estimation is more flexible than a possible OLS estimation with some coefficients set to zero, since the optimal obtained in lasso selects the best subset of variables to nullify. However, it must be taken into account that lasso optimization shrinks the magnitude of the non-zero coefficients as well, and for that reason OLS presents higher flexibility in those, allowing for a more accurate result (in the sense of presenting a lower error). All in all, a flexibility trade-off takes place between lasso and OLS regression.
+
+In contrast to ridge regression, the computation of $\hat{\beta}_{lasso}$ cannot be reduced to an explicit expression, and the cyclic coordinate descent algorithm is used instead. This algorithm converges to the global minimum by iterating:
+
+$$
+\hat{\beta}_j^{new} = S_\lambda \left ( \hat{\beta}_j + \frac{1}{n} \langle x_j, r \rangle \right ), \; \; \; \; \; \; \;\;\; r^{new} = r - \left ( \hat{\beta}_j^{new} - \hat{\beta}_j \right ) x_j 
+$$
+
+where $S_\lambda(x) = sign(x) (|x| - \lambda)$ is the self-thresholding operator. The `glmnet` R package implements this method to solve a similar minimization problem that allows for a mixture between $L_1$- and $L_2$-norm penalization terms, thus balancing the shrinkage and sparsity of the solution. The elastic net-penalty parameter `alpha` controlling this mixture will be set to 1 (actually its default value) to obtain lasso regression.
+
+```{r, include=FALSE}
+library(glmnet)  # for lasso regression
+```
+
+# 1. Lasso for the Boston Housing data
+
+## 1.1 Fitting a lasso regression model for `CMEDV`
+
+In this first exercise we will work with the `boston` dataset that was used in the previous assignment, which contains information about the housing market in the city of Boston. 13 explanatory variables will be assigned a coefficient in the parameter vector to predict `CMEDV`, the corrected version of the median value of owner-occupied homes. First, we will obtain the matrices of observations as follows:
+
+```{r}
+load("boston.Rdata")
+
+#Select explanatory and response variables
+boston = boston.c[c("CRIM","ZN","INDUS","CHAS","NOX","RM","AGE","DIS",
+                    "RAD","TAX","PTRATIO","B","LSTAT","CMEDV")]
+
+Y = scale(boston$CMEDV, center=TRUE, scale=FALSE) # scale target var
+X1 = scale(boston[,c(-4,-14)], center=TRUE, scale=TRUE)  # remove CHAS and scale expl.
+X = cbind(X1, as.numeric(boston$CHAS)-1) # add CHAS after scaling
+colnames(X) = c(colnames(X1), "CHAS") 
+p = dim(X)[2] # 13 explanatory
+n = dim(X)[1] # 506 observations
+```
+
+Notice that since `CHAS` is a factor (binary) variable, it has not been taken into account in the scale of the dataset. Now we can work with the regression model and perform K-fold cross-validation to tune the parameter $\lambda$. By default, `glmnet` considers $K=10$ sets and 100 candidate $\lambda$ values.
+
+```{r}
+lasso.1 <- glmnet(X,Y, standardize=FALSE, intercept=FALSE)
+cv.lasso.1 <- cv.glmnet(X,Y, standardize=FALSE, intercept=FALSE) # cross-validation
+```
+
+The choice of the optimal $\lambda$ is aided by the routine by providing two significant values: `lambda.min` and `lambda.1se`. The first one corresponds to $\lambda_{min} =\arg \min_\lambda MSE(\lambda)$, the value that minimizes the mean-squared error, and the second one is $\lambda_{\sigma}$ such that $MSE(\lambda_\sigma) = MSE(\lambda_{min}) + \sigma(MSE(\lambda_{min}))$; that is, the maximum value of $\lambda$ for which the mean error lays on the range of errors found for $\lambda_{min}$. This second parameter is significant in lasso regression, since the shrinkage of the vector is not the main factor determining the suitability of the model, but the number of coefficients that are made zero. In this sense, providing a less sparse vector that behaves almost as good as the sparsest one might be adequate in certain cases.
+
+```{r, echo=FALSE, fig.align='center', out.width='70%'}
+plot(cv.lasso.1)
+plot(lasso.1, xvar="lambda", label=TRUE) #label gives which column (variable) corresponds to each line
+
+abline(v=log(cv.lasso.1$lambda.min),col=2,lty=2)
+abline(v=log(cv.lasso.1$lambda.1se),col=2,lty=2)
+```
+
+We observe how the degrees of freedom of the model (i.e. the number of non-zero parameters, shown in the upper row of the $MSE(\lambda)$ plot) decrease significantly around $\lambda_{\sigma}$ from 11 to 8 even if $df(\lambda_{\sigma}) = 11$ still.
+
+```{r}
+pos.lambda.1se = cv.lasso.1$index[1]
+lasso.1$df[pos.lambda.1se]
+```
+
+For that reason, we will fit a regression model for this data using $\lambda_8 = \arg \min_\lambda \{ df(\lambda) = 8 \}$, from the default set of values of the model, so that we do not have to fit again.
+
+```{r, echo}
+lambda.8.pos = which(lasso.1$df == 8)[1]
+beta.8 = lasso.1$beta[,lambda.8.pos]
+data.frame(parameters = beta.8[which(abs(beta.8)>0)])
+```
+
+We observe how the model tends to preserve the most significant explanatory variables and set to zero those which do not affect the target in a substantial way. Attributes `LSTAT`, `RM` and `PTRATIO` are the ones that carry most of the weight, as it was obtained in the ridge regression assignment.
+
+-   `LSTAT`: It is negative and it measures the % of lower status of the population. If the value of `LSTAT` is high, it means the purchasing power is lower therefore the home price cost has to be smaller.
+
+-   `RM`: It is positive, which makes sense since it corresponds to the average number of rooms per dwelling. The higher is this number, the more likely the home cost will increase.
+
+-   `PTRATIO`: It is negative, which means that the higher the cost of the house, the less number of pupils per teacher, which is kind of a privilege.
+
+In contrast with previous results using ridge regression, the `INDUS` variable (accounting for the number of non-retail business acres per town) has been set to zero and `B` (proportional to the percentage of African-american neighbors) carries a higher weight.
+
+In genera, a lasso regression selects the best subset of variables to nullify and we observe in this particular case how `LSTAT`, `PTRATIO` and `RM` carry most of the weight of the vector. For that reason, it is intuitive to believe that a model with only three degrees of freedom will have similar accuracy in the result.
+
+```{r, }
+lambda.3.pos = which(lasso.1$df == 3)[1]
+beta.3 = lasso.1$beta[,lambda.3.pos]
+data.frame(parameters = beta.3[which(abs(beta.3)>0)])
+```
+
+```{r, echo=FALSE, out.width='70%', fig.align='center'}
+plot(cv.lasso.1)
+abline(v=log(cv.lasso.1$lambda.min),col=2,lty=2)
+abline(v=log(cv.lasso.1$lambda.1se),col=2,lty=2)
+abline(h=cv.lasso.1$cvm[lambda.8.pos], lty=2)
+abline(h=cv.lasso.1$cvm[lambda.3.pos], lty=2)
+```
+
+Indeed, the difference in the mean square error is not significant in this region, taking into account that we are able to reduce the degrees of freedom of the model from 8 to 3.
+
+## 1.2 Fitting a ridge regression model for `CMEDV`
+
+Now we will fit the previous model with ridge regression and compare the 10-fold cross-validation performed by the `glmnet` function with the `pmse_kCV` function we developed for the first assignment. We can perform a ridge regression calling `glmnet` with the parameter `alpha = 0`.
+
+```{r, echo = FALSE}
+# K-FOLD CROSS-VALIDATION
+pmse_kCV = function(X, Y, lambda.v, k){
+  n.lambdas = length(lambda.v)
+  p = dim(X)[2]
+
+  set.seed(123) # for reproducibility
+  folds = sample(rep(1:k, length.out = dim(X)[1])) # split in k sets
+  pmse.lambda = matrix(0,nrow=n.lambdas, ncol=1)
+  for (i in 1:k) {
+    # Get the training and validation subsets
+    x_train <- X[folds != i,]
+    y_train <- Y[folds != i]
+    x_val <- X[folds == i,]
+    y_val <- Y[folds == i]
+    nv = nrow(x_val)
+
+    # Now we fit the model for each lambda
+    for (l in 1:n.lambdas){ 
+      beta.lambda = t(solve(t(x_train)%*%x_train + lambda.v[l]*diag(1,p))) %*% t(x_train) %*% y_train
+      error.lambda = y_val - x_val %*% beta.lambda  # error
+      pmse.lambda[l] = pmse.lambda[l] + t(error.lambda)%*%error.lambda  # pmse
+    } 
+  }
+  pmse.cv = pmse.lambda/dim(X)[1]  # divide by n
+  return(pmse.cv)
+}
+```
+
+```{r}
+lambda.v = exp(seq(0,log(1e5+1),length=100))-1 # vector of lambdas to compare
+
+ridge.1 = glmnet(X,Y, standardize=FALSE, intercept=FALSE, alpha = 0) # ridge regression
+cv.ridge.1 = cv.glmnet(X,Y, standardize=FALSE, intercept=FALSE, 
+                       alpha = 0, type.measure = "mse", lambda = lambda.v)
+pmse.lambda.1 = cv.ridge.1$cvm
+pmse.lambda.2 = pmse_kCV(X, Y, lambda.v, 10) # using the same lambdas
+```
+
+```{r, echo=FALSE, out.width='70%', fig.align='center'}
+plot(range(log(lambda.v+1)-1), range(pmse.lambda.2),type="n",xlab="log(lambda+1)-1",
+       ylab="PMSE(lambda)")
+lines(log(lambda.v+1)-1, rev(pmse.lambda.1), col=2)
+points(log(lambda.v+1)-1, rev(pmse.lambda.1), pch=19,cex=1,col=2)
+
+lines(log(lambda.v+1)-1, pmse.lambda.2, col=4)
+points(log(lambda.v+1)-1, pmse.lambda.2, pch=19,cex=1,col=4)
+title("Comparison between predicted mean square error")
+abline(v = log(lambda.v[2]+1)-1, col = 'black', lty=2)
+legend('bottomright', legend=c('glmnet','pmse_kCV'), col=c(2,4), pch=c(16,16))
+```
+
+We see how the $PMSE(\lambda)$ is calculated in a different way between in both functions but its evolution for $\lambda$ is similar, even though they do not reach the same minimum.
+
+# 2. A regression model with $p \gg n$
+
+Now we will use a different dataset, this one consisting of $n = 240$ samples from patients with diffuse large B-cell lymphoma (DLBCL), with gene expression measurements for $p = 7399$ genes. With such a big number of explanatory variables, we want to select a sparse parameter vector to build a regression model that predicts the survival time of the patient.
+
+```{r, cache=TRUE, include=FALSE}
+# Load the data
+express = read.csv("journal.pbio.0020108.sd012.CSV",header=FALSE)
+surv = read.csv("journal.pbio.0020108.sd013.CSV",header=FALSE)
+death = (surv[,2]==1)
+log.surv = log(surv[death,1]+.05)
+expr = as.matrix(t(express[,death]))
+
+# Scaled matrices
+X = scale(expr, scale = TRUE, center = TRUE)
+Y = scale(as.matrix(log.surv), scale=FALSE, center=TRUE)
+```
+
+## 2.1 Lasso estimation for regressing `log.surv` against `expr`
+
+```{r, cache=TRUE}
+lasso.2 = glmnet(X, Y, standardize=FALSE, intercept=FALSE, seed=123)
+cv.lasso.2 = cv.glmnet(X, Y, standardize=FALSE, intercept=FALSE, seed = 123)
+```
+
+```{r echo=FALSE, out.width='70%'}
+knitr::include_graphics("toplot1.png", dpi = NA)
+```
+
+```{r echo=FALSE, out.width='70%'}
+knitr::include_graphics("toplot2.png", dpi = NA)
+```
+
+```{r eval=FALSE, fig.align='center', cache=TRUE, include=FALSE, out.width='70%'}
+plot(cv.lasso.2)
+plot(lasso.2, xvar="lambda") 
+abline(v=log(cv.lasso.2$lambda.min),col=4,lty=2)
+```
+
+The solution $\hat{\beta}_{min}$ presenting the lowest $MSE$ is considerably sparse, as only three parameters are different from zero. We see how $MSE(\lambda)$ achieves the lowest value in the range of 3 to 27 degrees of freedom, and thus a considerably sparse solution can be achieved without losing accuracy in the prediction.
+
+```{r eval=FALSE, echo=TRUE}
+beta.min = lasso.2$beta[,cv.lasso.2$index[1]]
+df = data.frame(parameters=beta.min[which(abs(beta.min)>0)])
+df
+```
+
+```{r echo=FALSE}
+load("tosave.RData")
+df
+```
+
+## 2.2 Plot observed vs predicted values
+
+We can plot now the predicted values for $\hat{\beta}_{min}$ against the real values of the logarithm of the survival time.
+
+```{r, echo=FALSE}
+# Non-standarized regression results:
+lasso.2.stan = glmnet(as.matrix(expr),log.surv, standardize=TRUE, intercept=TRUE)
+cv.lasso.2.stan = cv.glmnet(as.matrix(expr),log.surv, standardize=TRUE, intercept=TRUE)
+
+Y.pred = predict(lasso.2, newx=X, s=cv.lasso.2$lambda.min)
+Y.stan.pred = predict(lasso.2, newx=expr, s=cv.lasso.2$lambda.min) # at lambda min
+Y.val.hat = predict(lasso.2.stan,newx=X,s=cv.lasso.2.stan$lambda.min)
+```
+
+```{r, out.width='70%', fig.align='center', echo=FALSE}
+knitr::include_graphics("toplot3.png", dpi = NA)
+```
+
+## 2.3 OLS regression
+
+As explained before, there is a flexibility trade-off between lasso and OLS estimations. In this exercise we will fit a OLS regression model using only the set of non-zero parameters selected by the previous lasso routine.
+
+```{r, cache=TRUE, out.width='70%', fig.align='center'}
+s0 = which(abs(beta.min)>0)
+X.ols = X[, s0]
+ols = glmnet(X.ols,Y, standardize = FALSE, intercept = FALSE, lambda=0)
+Y.ols.pred = predict(ols, newx=X.ols, s=0)
+
+plot(Y.ols.pred, Y, asp=1, main = 'OLS predicted vs observed values',
+     xlab='log(survival)', ylab='OLS log(survival)')
+abline(a=0,b=1,col=2)
+```
+
+As we can see, the predictions in this case are slightly better than in the lasso estimation, as now the minimization problem only considers the estimation error and not the sparsity of the parameter vector, and then the optimal is achieved when the error is minimum.
+
+## 2.4 Comparison OLS and Lasso estimated coefficients
+
+The fact that the parameter vector is no longer required to be sparse makes the parameter coefficients achieve higher values. In this case, almost an order of magnitude separates them. The relative weights between them are also no longer the same.
+
+```{r, echo=FALSE}
+olsvslasso = data.frame(as.matrix(ols$beta, ncol=1), as.matrix(beta.min[s0], ncol=1))
+colnames(olsvslasso) = c("OLS", 'Lasso')
+```
+
+```{r}
+olsvslasso
+```
+
+```{r, echo=FALSE}
+load("toload2.RData")
+```
+
+```{r, cache=TRUE, out.width='70%', fig.align='center'}
+plot(Y.ols.pred, mean(log.surv) + Y.val.hat, asp=1, main='Predicted vs observed values',
+     xlab='OLS log(survival)', ylab='Lasso log(survival)')
+abline(a=0,b=1,col=2)
+lm = lm(mean(log.surv) + Y.val.hat ~ Y.ols.pred)
+abline(a=lm$coefficients[1], b = lm$coefficients[2])
+```
+
+We see how there is indeed a linear relation between the two predictions, which was expected given the linear nature of the predictors$\hat{y} = x^T \hat{\beta}$.
