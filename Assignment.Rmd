@@ -1,0 +1,162 @@
+---
+title: "Estimating the conditional variance"
+subtitle: "By local linear regression"
+
+author: "Wanchang Zhang"
+date: "2023-03-14"
+output: html_document
+---
+Aircraft Data
+We are using the Aircraft Data from R library `sm`. These data record six characteristics of aircraft designs which appeared during the 20th century.
+
+
+* `Yr` Year of first manufacture.
+* `Period` a code to indicate one of three broad time periods
+* `Power` total engine power (kW)
+* `Span` wing span (m)
+* `Weight` maximum take-off weight(kg)
+* `Speed` maximum speed(km/h)
+* `Range` range(km)
+
+We transform data taken logs (except`Yr` and `Period`); to `lgPower`,`lgSpan`,`lgWeight`,`lgSpeed`,`lgRange`
+
+
+```{r}
+library(sm)
+data(aircraft)
+help(aircraft)
+attach(aircraft)
+lgPower <- log(Power)
+lgSpan <- log(Span)
+lgLength <- log(Length)
+lgWeight <- log(Weight)
+lgSpeed <- log(Speed)
+lgRange <- log(Range)
+```
+
+
+# Estimatiing the conditional variance
+Consider the heteroscedastic regression model
+$$Y = m(x)+\sigma(x)\varepsilon = m(x)+\epsilon$$
+where $E(\varepsilon)=0,V(\varepsilon)=1$ and $\sigma^2(x)$ is an unknown function that gives the conditional variance of $Y$ given that the explanatory variable is equal to $x$.
+Let us define 
+$$Z = \log((Y-m(X))^2) = \log \varepsilon^2 $$  
+and $\delta = \log(\epsilon^2)$ is a random variable with expected value close to 0 (observe that $E[\log\varepsilon^2])\approx \log E(\epsilon^2) = \log(V(\epsilon)) = \log(1) = 0$ ) taking the role of noise in the regression of $Z$ against $x$ (that is, $Z$ is the response variable and $x$ is the predicting variable) .
+Given that the values of $\epsilon_i^2$ are not observable, a way to estimate the function $\sigma^2(x)$ is as follows:
+
+* 1 Fit a nonparameteric regression to data $(x_i,y_i)$ and save the estimated values $\hat{m}(x_i)$.
+
+```{r}
+source("R scripts for Local Plynomial Regression/lpr_visual.R")
+source("R scripts for Local Plynomial Regression/locpolreg.R")
+```
+
+```{r}
+h.cv.gcv <- function(x,y,h.v = exp(seq(log(diff(range(x))/20),
+                                       log(diff(range(x))/4),l=10)), 
+                     p=1,type.kernel="normal"){
+  n <- length(x)
+  cv <- h.v*0
+  gcv <- h.v*0
+  for (i in (1:length(h.v))){
+    h <- h.v[i]
+    aux <- locpolreg(x=x,y=y,h=h,p=p,tg=x,
+                     type.kernel=type.kernel, doing.plot=FALSE)
+    S <- aux$S
+    h.y <- aux$mtgr
+    hii <- diag(S)
+    av.hii <- mean(hii)
+    cv[i] <- sum(((y-h.y)/(1-hii))^2)/n
+    gcv[i] <- sum(((y-h.y)/(1-av.hii))^2)/n
+  }
+  return(list(h.v=h.v,cv=cv,gcv=gcv))
+}
+```
+
+## k-Fold Cross-Validation
+```{r}
+k.fold.cv <- function(x,y,k=10,h=range(x)/10,p=1,type.kernel="normal"){
+  n <- length(x)
+  Ik <- floor((0:(n-1))/(n/k))+1
+  ssr <- 0
+  for (i in (1:k)){
+    y.i <- y[Ik==i]
+    aux <- locpolreg(x[Ik!=i],y[Ik!=i],h=h,p=p,tg=x[Ik==i],
+                     type.kernel=type.kernel, doing.plot=FALSE)
+    ssr <- ssr + sum((y.i-aux$mtgr)^2)
+  }
+  k.cv <- ssr/n
+  return(k.cv)
+}
+
+h.k.fold.cv <- function(x,y,h.v = exp(seq(log(diff(range(x))/20),
+                                          log(diff(range(x))/4),l=10)), 
+                        k=10,p=1,type.kernel="normal"){
+  n <- length(x)
+  perm <- sample(1:n)
+  xperm <- x[perm]
+  yperm <- y[perm]
+  
+  k.cv <- h.v*0
+  for (i in (1:length(h.v))){
+    h <- h.v[i]
+    k.cv[i] <- k.fold.cv(x=xperm,y=yperm,k=k,h=h,p=p,
+                         type.kernel=type.kernel)
+  }
+  return(list(k=k,h.v=h.v,k.cv=k.cv))
+}
+```
+
+```{r}
+h.v <-  exp( seq(from=log(.5), to = log(15), length=12))
+n = dim(aircraft)[1]
+out.n.cv <- h.k.fold.cv(x=Yr, y=lgWeight, h.v=h.v, k=n)# n-fold-CV is the leave one out cross validation
+opt.h.cv <- h.v[c(which.min(out.n.cv$k.cv))] # 4.35468
+
+```
+
+```{r, fig.asp=1}
+res0_1 <- locpolreg(x=Yr,y=lgSpeed,h=opt.h.cv,q=1,r=1,main=paste("r=1,q=1,h=",opt.h.cv),type.kernel="epan")
+```
+```{r, fig.asp=1}
+res3_1 <- locpolreg(x=Yr,y=lgSpeed,h=opt.h.cv,q=3,r=1,main=paste("r=1,q=3,h=",opt.h.cv),type.kernel="epan")
+```
+
+* 2 Transform the estimated residuals $\hat{\epsilon}_i = y_i-\hat{m}(x_i)$:
+$$z_i = \log \epsilon_i^2 = \log((y_i-\hat{m}(x_i))^2)$$
+
+
+```{r}
+epsilon = lgWeight - res0_1$mtgr
+Z = log(epsilon^2)
+```
+
+* 3. Fit a nonparameteric regression to data $(x_i,z_i)$ and call the estimated function $\hat{q}(x)$. Observe that $\hat{q}(x)$ is an estimate of $\log(\sigma^2(x))$
+
+
+
+Now fit Z against X again using a different method to choose the h and local polynomial regression
+
+```{r}
+require(KernSmooth) # for function "dpill"
+(h.dpi <- dpill(x=Yr,y=Z,gridsize=101,range.x=range(Yr)))# h = 1.857887
+require(sm)
+q = sm.regression(x=Yr,y=Z,h=h.dpi,pch=1,cex=1,lwd=2)
+```
+```{r, fig.asp=1}
+res_check <- locpolreg(x=Yr,y=lgSpeed,h=h.dpi,q=1,r=1,main=paste("r=1,q=1,h=",opt.h.cv),type.kernel="epan")
+```
+* 4 Estimate $\sigma^2(x)$ by
+$$\hat{\sigma}^2(x) = \exp{\hat{q}(x)}$$
+
+```{r}
+variance = exp(q$estimate) # length 50
+variance.check = exp(res_check$mtgr)
+```
+Apply this procedure to estimate the conditional variance of `lgWeigth`(variable Y) given `Yr` (variable x). Draw a graphic of $\hat{\epsilon}_i^2$ against $x_i$ and superimpose the estimated function $\hat{\sigma}^2(x)$. Lastly draw the function $\hat{m}(x)$ and superimpose the bands $\hat{m}(x) \pm 1.96 \hat{\sigma}(x)$
+
+```{r}
+FinalY.upper = res0_1$mtgr + 1.96*variance.check
+FinalY.upper = res0_1$mtgr - 1.96*variance.check
+```
+
