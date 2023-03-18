@@ -2,8 +2,6 @@
 title: 'Assignment 5: Local Poisson Regression'
 subtitle: Ian Wallgren, Wanchang Zhang, Lavinia Hriscu, Victor Jimenez
 output:
-  pdf_document:
-    toc: no
   html_document:
     fig_caption: yes
     toc: no
@@ -15,6 +13,8 @@ output:
     highlight: tango
     fig_width: 10
     fig_weight: 10
+  pdf_document:
+    toc: no
   word_document:
     toc: no
 ---
