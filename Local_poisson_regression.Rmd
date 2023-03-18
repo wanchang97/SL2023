@@ -2,6 +2,8 @@
 title: 'Assignment 5: Local Poisson Regression'
 subtitle: Ian Wallgren, Wanchang Zhang, Lavinia Hriscu, Victor Jimenez
 output:
+  pdf_document:
+    toc: no
   html_document:
     fig_caption: yes
     toc: no
@@ -13,8 +15,6 @@ output:
     highlight: tango
     fig_width: 10
     fig_weight: 10
-  pdf_document:
-    toc: no
   word_document:
     toc: no
 ---
@@ -25,13 +25,7 @@ library(sm)
 library(ggplot2)
 ```
 
-In this assignment we will use a generalized non-parametric regression model to study the relation between two variables in a human development dataset.
 
-```{r}
-countries<-read.csv2(file="HDI.2017.subset.csv",row.names = 1)
-attach(countries)
-le.fm.r = round(le.fm)
-```
 
 In general, we consider a bivariate random variable $(X,Y)$ with joint distribution such that:
 
@@ -49,7 +43,13 @@ where $w_i^t \propto K \left ( \frac{t-x_i}{h} \right )$ are the weights for the
 
 # 1. Bandwidth choice for the local Poisson regression
 
-In this case, $(X,Y) \sim \text{Poiss} (\lambda(x))$ and $\lambda(x) = E(Y|X=x)$ is to be estimated, and a link function is not necessary as $\lambda(x) \in \mathbb{R}$ is already free of constraints. We will then use local Poisson regression and will focus the assignment in the choice of the bandwidth of the kernel such that the expected log-likelihood of an independent observation is maximized:
+In this case, $(X,Y) \sim \text{Poisson} (\lambda(x)),Y = 0,1,2,\cdots;$ 
+<!-- The regression function is chosen as $\lambda(x) \in (0,\infty) $. -->
+The regression function is chosen as:
+$$\lambda(x) \in (0,\infty)$$
+The link function is chosen as $$\log(\cdot)$$ and 
+the smooth function is $$\log(\lambda(x)) \in \mathbb{R}$$ free of constraints.
+We will then use local Poisson regression and will focus the assignment in the choice of the bandwidth of the kernel such that the expected log-likelihood of an independent observation is maximized: 
 
 $$
 h_{CV} = \arg \max_h l_{CV}(h) = \arg \min_h - \frac{1}{n} \sum_{i=1}^{n} \log \left ( \mathbb{\hat{P}}_h^{(-i)} (Y=y_i |X=x_i) \right )
@@ -74,7 +74,8 @@ loglik.CV.poisson <- function(x, y, h){
                  function(i, x, y, h){
                    sm.poisson(x=x[-i], y=y[-i], h=h, eval.points=x[i],display='none')$estimate
                  }, x, y, h)
-  return(-sum(y * log(lambda.i) - lambda.i - log(factorial(y))) / n)
+  return(-sum(y * log(lambda.i) - lambda.i - log(factorial(y))) )
+  #return(-sum(y * log(lambda.i) - lambda.i - log(factorial(y))) / n)
 }
 ```
 
@@ -102,26 +103,42 @@ h.cv.sm.poisson <- function(x, y, rg.h=NULL, l.h=10, method=loglik.CV.poisson){
 ```
 
 # 2. Local Poisson regression for Country Development Data
+In this assignment we will use a generalized non-parametric regression model to study the relation between two variables in a human development dataset.
 
-We will fit a local Poisson regression with the functions provided earlier to model `le.fm.r` (the rounded value of `le.fm`) IDK WHAT DOEST IT MEAN, which is non-negative integer, so it is suitable for the model, as a function of `Life.expec`, which is the life expectancy by country.
+```{r}
+countries<-read.csv2(file="HDI.2017.subset.csv",row.names = 1)
+attach(countries)
+le.fm.r = round(le.fm)
+```
+
+This file contains the following variables:
+
+* `Life.expec` Life expectancy at birth.
+* `Life.expec.f` Life expectancy at birth for females.
+* `Life.expec.m` Life expectancy at birth for males.
+* `le.fm` Difference `Life.expec.f` minus `Life.expec.m`.
+* `Inf.Mort.rat` Infant mortality rate: The annual number of deaths of infants under one year of age per 1,000 live births in the same year.
+* `Agric.employ.%` Employment in agriculture (% of total employment).
+
+We will fit a local Poisson regression with the functions provided earlier to model `le.fm.r` (the rounded value of `le.fm`) , which is non-negative integer, so it is suitable for the model, as a function of `Life.expec`, which is the life expectancy by country.
 
 First, we obtain the optimal bandwidth value `h.cv` using `h.cv.sm.poisson`:
 
 ```{r}
-cv.result = h.cv.sm.poisson(Life.expec, le.fm.r)
+h.CV.loglik.poisson  = h.cv.sm.poisson(Life.expec, le.fm.r)
 ```
 
 ```{r, echo=FALSE, fig.align='center', out.width='70%'}
-ggplot(data = data.frame(cv.result), aes(x=h, y=cv.h)) +
+ggplot(data = data.frame(h.CV.loglik.poisson), aes(x=h, y=cv.h)) +
   geom_point(size=3) + 
   geom_line(linewidth=1, lty=1) +
-  geom_vline(xintercept = cv.result$h.cv, lty=2, linewidth=1.2, col=2) + 
+  geom_vline(xintercept = h.CV.loglik.poisson$h.cv, lty=2, linewidth=1.2, col=2) + 
   labs(title="LOO-CV error as function of h", 
        subtitle="For a local Poisson regression", x="Bandwidth (h)", y= "LOO-CV")
 ```
 
 ```{r}
-h.cv = cv.result$h.cv
+h.cv = h.CV.loglik.poisson$h.cv
 h.cv
 ```
 
@@ -137,3 +154,16 @@ ggplot() +
   geom_line(aes(x=cv.pois$eval.points, y=cv.pois$estimate), lty=2, col='blue', linewidth=1.5) + 
   labs(title="Local Poisson regression")
 ```
+```{r,include=FALSE}
+aux <- sm.poisson(Life.expec,le.fm.r,h=h.CV.loglik.poisson$h.cv)
+title(main=paste("h.cv.loglik.poisson =",round(h.CV.loglik.poisson$h.cv,2),sep=""))
+
+aux.glm <- glm(le.fm.r ~ Life.expec,family=poisson)
+pred <- predict(aux.glm, 
+                newdata=data.frame(Life.expec=aux$eval.points),
+                type="response")
+lines(aux$eval.points,pred,col=2,lty=2)
+legend("left",c("Local Poisson","Poisson"),
+      col=c(1,2),lty=c(1,2))
+```
+
