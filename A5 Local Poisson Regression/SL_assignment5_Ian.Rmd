@@ -1,0 +1,100 @@
+---
+title: "SL_assignment5_Ian"
+author: "Ian Wallgren"
+date: "2023-03-19"
+output: pdf_document
+---
+
+#### Modify the functions h.cv.sm.binomial and loglik.CV to obtain a bandwidth choice method for the local Poisson regression based on the leave-one-out cross-validation (loo-CV) estimation of the expected likelihood of an independent observation.
+
+
+We have that the loo-CV estimation of the exp. log-likelihood for an independent observation is
+
+$ l_{CV}(h) = \frac{1}{h} \sum_{i=1} log(Pr_{i,h}(Y = y_{i} | X = x_{i})), $ where $ Pr_{i,h}(Y = y_{i} | X = x_{i})$ is an estimation of $ e^{-\lambda} \cdot  \frac{\lambda_{i}^{y_{i}}}{y_{i}!}$
+,
+where $h$ is the size of the bandwidth, aka smoothing parameter, and $\lambda_{i} = E(Y|X=x_{i})$ is estimated using $h$.
+
+Therefore, we will need to make some adjustments to the original function presented.
+
+
+```{r}
+countries<-read.csv2(file="HDI.2017.subset.csv",row.names = 1)
+attach(countries)
+head(countries)
+```
+
+
+```{r}
+
+h.cv.sm.poisson <- function(x,y,rg.h=NULL,l.h=10,method=loglik_CV_poisson){
+   cv.h <- numeric(l.h)
+   if (is.null(rg.h)){
+      hh <- c(h.select(x,y,method="cv"),
+              h.select(x,y,method="aicc"))#,hcv(x,y))
+      rg.h <- range(hh)*c(1/1.1, 1.5)
+   }
+   i <- 0
+   gr.h <- exp( seq(log(rg.h[1]), log(rg.h[2]), l=l.h))
+   for (h in gr.h){
+      i <- i+1
+      cv.h[i] <- method(x,y,h)
+   }
+   return(list(h = gr.h, 
+               cv.h = cv.h, 
+               h.cv = gr.h[which.min(cv.h)]))
+}
+
+
+#with this function we calculate the sum of the independent loo-CV estimation (i.e. as many as we have y values), which depends on the voice of our bandwidth h. This number, in order to select the best possible h, we want to minimize (since we are looking to maximize the log-likelihood).
+
+loglik_CV_poisson <- function(x,y,h){
+  n <- length(x)
+  sum_ = 0
+  for (i in 1:n){
+    pred  = sm.poisson(x=x[-i],y=y[-i],h=h,eval.points=x[i],display="none")$estimate
+    sum_i = log(exp(-pred) * (pred^y[i]) / factorial(y[i]))
+    sum_  = sum_ + sum_i
+  }
+  
+  l_cv = (1/n) * sum_
+  return(l_cv)
+}
+
+
+##cleaning data
+le_fm      = as.matrix(countries$le.fm)
+le_fm_r    = round(le_fm,0)
+life_expec = as.matrix(countries$Life.expec)
+
+
+```
+
+### Fit a local Poisson regression modeling le_fm_r as a function of Life_expec. Use sm.poisson from the R package sm with the bandwidth obtained by loo-CV.
+
+Without further instructions, we assume that it is expected to select a vector of possible bandwidth choices, run them through our function, and select the best option.
+
+```{r}
+results = h.cv.sm.poisson(life_expec,le_fm_r)
+
+#according to our function, the best h is:
+best_h = results$h.cv
+cat("The best value of the smoothing parameters is", best_h)
+
+```
+Now, having found our optimal $h$, we use it to fit our local poission regression.
+
+
+```{r}
+
+fitted_poission_model = sm.poisson(life_expec,le_fm_r,best_h,display='none')
+
+ggplot() +
+  geom_point(aes(x=life_expec, y=le_fm_r), size=1.5) +
+  geom_line(aes(x=cv.pois$eval.points, y=cv.pois$estimate), lty=3, col='Red', linewidth=2) + 
+  labs(title="Local Poiss. regr.")
+
+
+```
+Indeed, it looks like our choice of the smoothing parameter $h$, aka bandwidth, did a good job of helping fit the data. From the graph displayed above, we can see that there is a positive relationship between life expectancy and the difference between life expectancy at birth for females and males for almost the entire domain, however, when the life expectancy is really big the relationship between the variables is inverted (the regression is concave). It is interesting to see that the greater the difference of life expectancy at birth between women and men is, the greater is the expected life expectancy for any newborn in that specific country (for discretionary purposes we exlude the fact that the fitted line actually dips a little towards higher life expectancy, this could be an artifact of not having selected the best range of possible bandwidth values to be assessed).
+
+
