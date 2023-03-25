@@ -1,0 +1,226 @@
+---
+title: "SL_assignment6_Ian"
+author: "Ian Wallgren"
+date: "2023-03-24"
+output: pdf_document
+---
+
+
+Consider the nonparametric regression of cnt as a function of instant.
+Estimate the regression function m(instant) of cnt as a function of
+instant using a cubic regression splines estimated with the R function
+smooth.splines and choosing the smoothing parameter by Generalized
+Cross Validation.
+
+```{r}
+
+x <- bikes$instant
+y <- bikes$cnt
+
+
+library(interp)
+#install.packages("mblm")
+library(mblm)
+
+
+#choosing the optimal smoothing param by setting cv to TRUE
+cubic_spline_fit = smooth.spline(x=x, y=y, cv = TRUE)
+
+
+#a)
+cat("The value of the chosen penalty term amplifier lambda is: ",cubic_spline_fit$lambda)
+
+#b)
+cat("The corresponding number of degrees of freedom is: ",cubic_spline_fit$df)
+
+#c)
+#we take minus to since the first and last one does not "count" as knots
+num_knots = cubic_spline_fit$fit$nk - -2
+cat("Number of knots used is: ",num_knots)
+
+#d)
+plot(x, y, xlab = "instant", ylab = "cnt")
+lines(cubic_spline_fit, col = "dark green", lwd = 2)
+legend("topleft", legend = "Fitted cubic spline", col = "dark green", lwd = 2)
+title("Scatterplot of cnt vs. instant with cubic spline fitted line")
+
+
+```
+
+Define a new variable cnt.5000 taking the value 1 for days such that the
+number of total rental bikes is larger than or equal to 5000, on 0 otherwise.
+
+```{r}
+
+#creating an empty col
+bikes$cnt_5000 <- rep(NA, dim(bikes)[[1]])
+
+#there should be a fancier way of doing this, not used to R hehe
+for (x in 1:dim(bikes)[[1]]){
+  if (bikes$cnt[x] > 5000){
+    bikes$cnt_5000[x] = 1 
+  } else {
+    bikes$cnt_5000[x] = 0
+  }
+  
+}
+
+
+
+```
+
+a) Use the function logistic.IRWLS.splines to fit the non-parametric
+binary regression cnt.5000 as a function of the temperature, using
+df=6.
+
+```{r}
+
+#copy paste function
+logistic.IRWLS.splines <- function(x,y,weights.out=1,x.new=x,
+                           df=6,spar=NULL, 
+                           all.knots = FALSE, nknots = .nknots.smspl,  
+                           max.iter=10,eps.beta=1e-5,
+                           plts=FALSE){
+  if (plts&(dim(as.matrix(x))[2]>1)){
+    plts<-FALSE
+    warning("Plots are valid only when dim(x)[2]==1")
+  }
+  # Step 0
+  stop.rule <- FALSE
+  iter <- 0
+  theta.0 <- fitted(lm(y~x)) 
+  
+  while (!stop.rule){
+    iter <- iter + 1 
+    # step 1
+    p <- p.from.theta(theta.0)
+    ps.e <- (y-p)/(p*(1-p))
+    z <- theta.0 + ps.e 
+    wt <- p*(1-p) *weights.out
+    
+    if (plts){
+      op<-par(mfrow=c(1,2))
+      plot(x,y,cex=8*wt)
+      lines(x,p,col=2)
+      plot(x,z,cex=8*wt)
+      lines(x,theta.0,col=2)
+      par(op)
+    }
+    
+    spline.1 <- smooth.spline(x,z,w=wt,df=df,spar=spar,
+                              all.knots = all.knots,
+                              nknots = nknots) 
+    theta.1 <- predict(spline.1,x=x)$y
+    
+    # checking stop rules
+    if ((iter>=max.iter)|(sum((theta.1-theta.0)^2)<eps.beta)){
+      stop.rule<-TRUE
+    } else {
+      theta.0 <- theta.1
+    }
+  }
+  
+  p <- p.from.theta(theta.1)
+  resid.devi <- sum(-2*dbinom(y,1,p,log=TRUE))
+  
+  return(list(fitted.values=p,
+              theta.x=theta.1,
+              df=spline.1$df,
+              predicted.values=p.from.theta(predict(spline.1,x=x.new)$y),
+              residual.deviance=resid.devi)
+  )
+} 
+
+# This is an auxiliary function for logistic.IRWLS.splines
+#
+# p.from.theta(theta,x) 
+# computes the vector of probabilities p, with elements
+# p_i=\hat{Pr}(Y_i=1|X=x_i), i=1,...,n,
+# where x_i is the ith row of matrix "x",
+# a logistic link is assumed, and "theta" is the vector 
+# with the nonparametric estimations of 
+# log( Pr(Y_i=1|X=x_i)/(1-Pr(Y_i=1|X=x_i)) ), i=1,...,n.
+p.from.theta <- function(theta.x){
+  p.x <- 1/(1+exp(-theta.x))
+  return(p.x)
+}
+
+
+```
+
+
+Applying the function to the obtain desired regression
+
+In which range of temperatures is
+Pr(cnt >= 5000|temp) larger than 0,5?
+
+```{r}
+
+log_reg_tmp_cnt5000 = logistic.IRWLS.splines(bikes$temp,bikes$cnt_5000,df=6)
+
+plot(log_reg_tmp_cnt5000$predicted.values)
+
+#finding indices where Pr(cnt >= 5000 | temp) > 0.5
+idx <- which(log_reg_tmp_cnt5000$predicted.values > 0.5)
+
+plot(bikes$temp[idx])
+
+min_temp = min(bikes$temp[idx])
+max_temp = max(bikes$temp[idx])
+range_temp = c(min_temp,max_temp)
+
+cat("The range of the temperature where the probability of cnt_5000 to be greater than 0.5 is: ",range_temp)
+```
+
+Choose the parameter df by k-fold log-likelihood cross validation
+with k = 5 and using df.v = 3:15 as the set of possible values for
+df.
+
+```{r}
+
+df_v = seq(3,15)
+
+
+
+
+# modifying Pedro's function to k-fold instead of leave one out
+loglik.KCV <- function(x,y,df){
+  df_v_res = numeric(15-3)
+  n <- length(x)
+  n_div_k = round(n / 5)
+  
+  pred <- sapply(1:n_div_k, 
+      function(k,x,y,df){
+        
+        logistic.IRWLS.splines(x=bikes$temp[-k],y=bikes$cnt_5000[-k],df=df)$predicted.values
+        
+         #sm.binomial(x=x[-i],y=y[-i],h=h,eval.points=x[i],display="none")$estimate
+      },   x,y,df)
+  return(-sum( y*log(pred/(1-pred)) + log(1-pred) )/n)
+}
+
+degfree_kfold = function(x,y,dfv,method=loglik.KCV){
+  i = 0
+  for (df in dfv){
+    i = i+1
+    df_v_res[i] = method(x,y,df) 
+  }
+  return(list(df       = df_v,
+              df_v_res = df_v_res,
+              best_df  = df_v[which.min(df_v_res)]))
+  
+  
+  
+}
+
+degfree_kfold(x=bikes$temp,y=bikes$cnt_5000,df_v)
+
+#best degree of freedom choice turns out to be 3
+```
+
+
+
+
+
+
+
