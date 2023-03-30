@@ -33,8 +33,6 @@ if(!require("ISLR")) install.packages("ISLR")
 require("knitr")
 require("tree")
 require("ISLR")
-
-
 ```
 
 
@@ -44,7 +42,7 @@ require("ISLR")
 
 myDescription <- "The data are a simulated data set containing sales of child car seats
 at different stores [@james2013introduction]"
-mydataset <- Carseats
+mydataset <- Carseats # easy to general change raw data
 ```
 
 
